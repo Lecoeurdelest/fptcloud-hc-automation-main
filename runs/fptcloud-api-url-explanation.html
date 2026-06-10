@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FPT Cloud API URL Explanation</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      line-height: 1.55;
+      color: #1f2933;
+      background: #f6f8fa;
+    }
+
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 40px 24px;
+      background: #ffffff;
+      min-height: 100vh;
+    }
+
+    h1, h2 {
+      color: #102a43;
+      line-height: 1.2;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 30px;
+    }
+
+    h2 {
+      margin-top: 32px;
+      font-size: 20px;
+      border-bottom: 1px solid #d9e2ec;
+      padding-bottom: 8px;
+    }
+
+    code {
+      background: #eef2f7;
+      border: 1px solid #d9e2ec;
+      border-radius: 4px;
+      padding: 2px 5px;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 0.95em;
+    }
+
+    .summary {
+      background: #eef8ff;
+      border-left: 4px solid #2680c2;
+      padding: 14px 16px;
+      margin: 20px 0;
+    }
+
+    .warning {
+      background: #fff8e6;
+      border-left: 4px solid #f0b429;
+      padding: 14px 16px;
+      margin: 20px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border: 1px solid #d9e2ec;
+      padding: 10px;
+    }
+
+    th {
+      background: #f0f4f8;
+    }
+
+    ul {
+      padding-left: 22px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Explanation of the FPT Cloud API URL</h1>
+
+    <div class="summary">
+      <strong>API URL used:</strong> <code>https://console-api.fptcloud.com/api</code><br>
+      <strong>Project variable:</strong> <code>FPTCLOUD_API_URL</code><br>
+      <strong>Terraform provider argument:</strong> <code>api_endpoint</code>
+    </div>
+
+    <h2>What This API URL Means</h2>
+    <p>
+      The API URL is the base HTTPS endpoint for the FPT Cloud control plane.
+      In this project, Terraform and worker processes use it as the network
+      address for requests such as reading tenant information, reading VPC
+      information, and provisioning cloud resources.
+    </p>
+    <p>
+      For example, during the connection test Terraform attempted to read tenant
+      data through a request shaped like:
+      <code>https://console-api.fptcloud.com/api/v2/tenant/FCI-L1-ORG</code>.
+      That shows that <code>https://console-api.fptcloud.com/api</code> is treated as the
+      base URL, while paths such as <code>/v2/tenant/...</code> are added by
+      the FPT Cloud Terraform provider.
+    </p>
+
+    <h2>Where It Comes From</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Reference</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Project infrastructure spec</td>
+          <td><code>specs/02-INFRASTRUCTURE.md</code></td>
+          <td>
+            Lists <code>FPTCLOUD_API_URL=https://console-api.fptcloud.com/api</code> as a
+            required runtime environment variable.
+          </td>
+        </tr>
+        <tr>
+          <td>Project requirements</td>
+          <td><code>specs/01-REQUIREMENTS.md</code></td>
+          <td>
+            Requires provider authentication/configuration to come from
+            environment variables such as <code>FPTCLOUD_API_URL</code>,
+            <code>FPTCLOUD_REGION</code>, <code>FPTCLOUD_TENANT_NAME</code>,
+            and <code>FPTCLOUD_TOKEN</code>.
+          </td>
+        </tr>
+        <tr>
+          <td>Connection-check Terraform</td>
+          <td><code>runs/fptcloud-connect-check/main.tf</code></td>
+          <td>
+            Passes the URL into the FPT Cloud Terraform provider through the
+            provider argument <code>api_endpoint</code>.
+          </td>
+        </tr>
+        <tr>
+          <td>Application configuration code</td>
+          <td><code>src/hc/config/settings.py</code></td>
+          <td>
+            Reads <code>FPTCLOUD_API_URL</code> and forwards it to Terraform
+            subprocesses so workers can talk to the FPT Cloud provider.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Purpose in This Project</h2>
+    <p>
+      This repository automates FPT Cloud tenant health checks. Its workers use
+      Terraform modules to create, inspect, and validate resources such as
+      subnets, virtual machines, disks, floating IPs, security groups, and object
+      storage buckets.
+    </p>
+    <p>
+      The API URL tells the Terraform provider which FPT Cloud control-plane
+      endpoint to contact. Without it, the provider may use a default endpoint
+      or fail if no endpoint is configured. With it, the project can explicitly
+      target the intended FPT Cloud environment.
+    </p>
+
+    <h2>Why This URL Was Chosen</h2>
+    <ul>
+      <li>
+        It is the endpoint selected for this project and documented in the
+        repository's infrastructure specification as the required value for
+        <code>FPTCLOUD_API_URL</code>.
+      </li>
+      <li>
+        It matches the variable model used by the project: provider settings are
+        supplied at runtime rather than hard-coded with credentials.
+      </li>
+      <li>
+        It is the most direct candidate for the FPT Cloud public control-plane
+        API because the project documentation explicitly uses it as the example
+        and default endpoint.
+      </li>
+      <li>
+        It lets Terraform construct provider API calls while keeping tenant,
+        region, and token values separate.
+      </li>
+    </ul>
+
+    <h2>Connection Test Result</h2>
+    <div class="warning">
+      The Terraform provider initialized successfully and the Terraform
+      configuration is valid. The live connection test failed because DNS on
+      this machine could not resolve the previous endpoint
+      <code>api.fptcloud.com</code>.
+    </div>
+    <p>
+      The earlier observed error was:
+      <code>lookup api.fptcloud.com: no such host</code>.
+      This means the current blocker is not Terraform syntax or missing module
+      resources. It is either the API URL itself, local DNS resolution, network
+      routing, VPN/private access requirements, or a required alternative FPT
+      Cloud endpoint for this tenant.
+    </p>
+
+    <h2>Recommendation</h2>
+    <p>
+      Confirm the correct FPT Cloud API endpoint with the platform documentation
+      or tenant administrator. If the tenant requires a regional, private, or
+      console-specific endpoint, update <code>FPTCLOUD_API_URL</code> in the
+      local environment and <code>api_endpoint</code> in the connection-check
+      variables, then rerun <code>terraform plan</code>.
+    </p>
+  </main>
+</body>
+</html>

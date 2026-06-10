@@ -1,0 +1,104 @@
+name: fptcloud-hc
+
+x-app-env: &app-env
+  REDIS_URL: redis://redis:6379/0
+  DATABASE_URL: postgresql://hc:hc@postgres:5432/hc
+  HC_REAPER_IDLE_MS: "300000"
+  HC_MAX_ATTEMPTS: "3"
+  HC_LOG_LEVEL: INFO
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hc
+      POSTGRES_PASSWORD: hc
+      POSTGRES_DB: hc
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hc"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # One-shot DB migration runner. App services wait on it completing.
+  migrate:
+    build:
+      context: .
+      target: cli
+    image: hc-cli
+    environment: *app-env
+    entrypoint: ["hc"]
+    command: ["db", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  producer:
+    build:
+      context: .
+      target: producer
+    image: hc-producer
+    environment: *app-env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    profiles: ["run"]
+
+  worker:
+    build:
+      context: .
+      target: worker
+    image: hc-worker
+    env_file:
+      - path: .env
+        required: false
+    environment: *app-env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      replicas: 4
+    profiles: ["run"]
+
+  reaper:
+    build:
+      context: .
+      target: reaper
+    image: hc-reaper
+    environment: *app-env
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: ["run"]
+
+  cli:
+    build:
+      context: .
+      target: cli
+    image: hc-cli
+    environment: *app-env
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: ["tools"]

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FPT Cloud Connection Check Instructions</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: #1f2933;
+      background: #f6f8fa;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 24px;
+      background: #ffffff;
+      min-height: 100vh;
+    }
+
+    h1, h2 {
+      color: #102a43;
+      line-height: 1.2;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 30px;
+    }
+
+    h2 {
+      margin-top: 30px;
+      font-size: 20px;
+      border-bottom: 1px solid #d9e2ec;
+      padding-bottom: 8px;
+    }
+
+    code, pre {
+      font-family: Consolas, Monaco, monospace;
+    }
+
+    code {
+      background: #eef2f7;
+      border: 1px solid #d9e2ec;
+      border-radius: 4px;
+      padding: 2px 5px;
+    }
+
+    pre {
+      overflow-x: auto;
+      background: #102a43;
+      color: #f0f4f8;
+      padding: 14px 16px;
+      border-radius: 6px;
+    }
+
+    .note {
+      background: #eef8ff;
+      border-left: 4px solid #2680c2;
+      padding: 14px 16px;
+      margin: 18px 0;
+    }
+
+    .warn {
+      background: #fff8e6;
+      border-left: 4px solid #f0b429;
+      padding: 14px 16px;
+      margin: 18px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border: 1px solid #d9e2ec;
+      padding: 10px;
+    }
+
+    th {
+      background: #f0f4f8;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>FPT Cloud Connection Check</h1>
+
+    <div class="note">
+      This check uses Terraform to read the configured FPT Cloud VPC and preview
+      a test subnet. It uses <code>terraform plan</code>, so it does not create,
+      update, or delete cloud resources.
+    </div>
+
+    <h2>Files Used</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>.env</code></td>
+          <td>Provides <code>FPTCLOUD_API_URL</code>, region, tenant name, and token.</td>
+        </tr>
+        <tr>
+          <td><code>runs/fptcloud-connect-check/main.tf</code></td>
+          <td>Terraform configuration used for the connection check.</td>
+        </tr>
+        <tr>
+          <td><code>runs/fptcloud-connect-check/connect.auto.tfvars</code></td>
+          <td>Local values for VPC name, VPC ID, subnet name, CIDR, and gateway IP.</td>
+        </tr>
+        <tr>
+          <td><code>scripts/check-fptcloud-connect.ps1</code></td>
+          <td>PowerShell helper that loads <code>.env</code> and runs Terraform.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Expected API URL</h2>
+    <p>
+      The project should use:
+      <code>https://console-api.fptcloud.com/api</code>
+    </p>
+
+    <h2>Run the Check</h2>
+    <p>Open PowerShell from the repository root and run:</p>
+    <pre>.\scripts\check-fptcloud-connect.ps1</pre>
+
+    <p>
+      If Terraform is installed but not available on <code>PATH</code>, pass the
+      full executable path:
+    </p>
+    <pre>.\scripts\check-fptcloud-connect.ps1 -TerraformPath "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Hashicorp.Terraform_Microsoft.Winget.Source_8wekyb3d8bbwe\terraform.exe"</pre>
+
+    <h2>Successful Result</h2>
+    <p>A successful connection shows Terraform reading the VPC:</p>
+    <pre>data.fptcloud_vpc.selected: Read complete
+selected_vpc_id     = "c9c1cfd6-7926-4a8a-96c6-cb4cd9d4aa19"
+selected_vpc_status = "ENABLED"</pre>
+
+    <h2>What the Plan Means</h2>
+    <p>
+      Terraform may show <code>Plan: 1 to add, 0 to change, 0 to destroy</code>.
+      That is only a preview for the test subnet. It confirms Terraform can use
+      the provider and resolve the configured VPC.
+    </p>
+
+    <div class="warn">
+      Do not run <code>terraform apply</code> unless you intentionally want to
+      create the test subnet.
+    </div>
+
+    <h2>Troubleshooting</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Error</th>
+          <th>Likely Cause</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>terraform is not recognized</code></td>
+          <td>Terraform is not installed or the current shell has not refreshed <code>PATH</code>.</td>
+        </tr>
+        <tr>
+          <td><code>lookup ... no such host</code></td>
+          <td>Wrong API URL, DNS issue, VPN issue, or blocked outbound network access.</td>
+        </tr>
+        <tr>
+          <td><code>401</code> or credential error</td>
+          <td>The token in <code>.env</code> is missing, expired, or not authorized for the tenant.</td>
+        </tr>
+        <tr>
+          <td>VPC not found</td>
+          <td>Check <code>vpc_name</code>, <code>vpc_id</code>, tenant, and region in the configuration files.</td>
+        </tr>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

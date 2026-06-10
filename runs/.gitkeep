@@ -1,0 +1,2 @@
+# Per-run working directories and rendered reports land here at runtime.
+# Tracked as an empty directory so the layout exists on a fresh checkout.

@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fptcloud-hc-automation"
+version = "0.1.0"
+description = "FPT Cloud health-check automation framework"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "MPL-2.0" }
+dependencies = [
+    "click>=8.1",
+    "fakeredis>=2.21",
+    "pydantic>=2.6",
+    "python-terraform>=0.10",
+    "redis>=5.0",
+    "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "coverage[toml]>=7.4",
+    "mypy>=1.8",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "ruff>=0.3",
+]
+
+[project.scripts]
+hc = "hc.cli.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: unit tests (no external deps)",
+    "integration: requires Redis container",
+    "live: requires real FPT Cloud tenant (gated by HC_LIVE_TESTS=1)",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/hc"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 0
+show_missing = true
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["hc"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
