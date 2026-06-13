@@ -9,6 +9,8 @@ import click
 import redis
 
 from hc.config.settings import QueueSettings
+from hc.db import migrate
+from hc.producer import DEFAULT_MAX_JOBS, ProducerError, create_health_checks
 from hc.queue.redis_queue import RedisQueue
 
 
@@ -70,6 +72,68 @@ def dlq_replay(entry_id: str) -> None:
         click.echo(str(exc), err=True)
         sys.exit(1)
     click.echo(json.dumps({"new_entry_id": new_id}))
+
+
+@cli.group()
+def db() -> None:
+    """Database initialization commands."""
+
+
+@db.command("migrate")
+def db_migrate() -> None:
+    """Apply idempotent Postgres initialization DDL."""
+    try:
+        migrate()
+    except Exception as exc:  # noqa: BLE001
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+    click.echo(json.dumps({"status": "ok"}))
+
+
+@cli.group("health-checks")
+def health_checks() -> None:
+    """Health-check job commands."""
+
+
+@health_checks.command("create")
+@click.option("--spec", "spec_path", required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--run-id", required=True, help="Run identifier used for task deduplication.")
+@click.option("--tenant-id", required=True, help="Tenant identifier for the health-check run.")
+@click.option(
+    "--max-jobs",
+    default=DEFAULT_MAX_JOBS,
+    show_default=True,
+    help="Maximum number of health-check jobs to create at a time.",
+)
+@click.option(
+    "--log-file",
+    default="log.html",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="HTML progress log path.",
+)
+def health_checks_create(
+    spec_path: str,
+    run_id: str,
+    tenant_id: str,
+    max_jobs: int,
+    log_file: str,
+) -> None:
+    """Create health-check jobs and record progress to log.html."""
+    try:
+        result = create_health_checks(
+            queue=_queue(),
+            spec_path=spec_path,
+            run_id=run_id,
+            tenant_id=tenant_id,
+            log_path=log_file,
+            max_jobs=max_jobs,
+        )
+    except ProducerError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    click.echo(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

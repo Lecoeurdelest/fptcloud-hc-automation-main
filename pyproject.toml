@@ -13,6 +13,7 @@ dependencies = [
     "click>=8.1",
     "fakeredis>=2.21",
     "pydantic>=2.6",
+    "psycopg[binary]>=3.1",
     "python-terraform>=0.10",
     "redis>=5.0",
     "structlog>=24.1",
@@ -33,6 +34,9 @@ hc = "hc.cli.main:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hc"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/hc/reporter/html_log.html" = "hc/reporter/html_log.html"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -158,6 +158,12 @@ capture state and outputs, surface classified errors.
       request classifier update.
 - [x] `mypy --strict src/hc/executor/` clean.
 
+> Audit note (2026-06-12): `terraform fmt -check`, `terraform init
+> -backend=false`, and `terraform validate` passed for every module in
+> `modules/` (`disk`, `floating_ip`, `object_storage`, `security_group`,
+> `subnet`, `vm`). `tflint` was not installed on this host, so this DoD line
+> remains `[~]`.
+
 ### Review gate
 
 - [ ] Evaluator reviews one full apply log (subnet creation) end-to-end and
@@ -273,6 +279,12 @@ provisioned via Terraform, validated, and recorded — for one TC.
       in `00-ARCHITECTURE.md` §8.
 - [ ] **P5.T8** — End-to-end integration test for TC-001 (subnet) using a
       recorded provider response (`pytest-vcr` or hand-rolled fixture).
+- [~] **P5.T9** — Live health-check runner hardening: after Terraform apply,
+      wait briefly for provider-side resource readiness; if a resource is still
+      provisioning, place the task in a pending queue and poll it until ready or
+      timeout. Terminal failures go to an error queue. Every task must acquire
+      a resource-group lock before plan/apply/destroy so live jobs cannot race
+      each other or exceed quota by creating duplicate resources.
 
 ### DoD
 
@@ -281,6 +293,21 @@ provisioned via Terraform, validated, and recorded — for one TC.
 - [ ] Killing the worker mid-apply during the smoke test results in the task
       reaching PASS after recovery, with `attempts >= 2` and no duplicate
       resources in the tenant.
+- [~] Live health-check reruns record `planned`, `active`, `pending`, `error`,
+      and `destroyed` resource states in `log.html`; a final no-survivors state
+      check confirms cleanup after success or failure.
+
+> Implementation note (2026-06-12): `scripts/run_health_checks.py` is the
+> current live-run harness while the full Phase 5 worker is still open. It
+> serializes related service groups, writes pending/error queue files under the
+> run directory, and uses filesystem locks under `runs/.locks/` to prevent
+> conflicting live jobs.
+>
+> Live rerun note (2026-06-12): reran the harness against the configured tenant.
+> `error_queue.json` captured terminal provider/configuration failures and all
+> lock files were released. `pending_queue.json` ended empty because no apply
+> reached a successful-but-still-provisioning state; attempted resources were
+> destroyed after each failure.
 
 ### Review gate
 

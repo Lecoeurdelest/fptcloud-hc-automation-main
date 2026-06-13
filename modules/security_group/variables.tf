@@ -26,14 +26,14 @@ variable "rules" {
       direction        - "ingress" or "egress"
       protocol         - "tcp", "udp", "icmp", or "-1" (all)
       port_range       - port range string (e.g. "80" or "80-443")
-      sources          - CIDR/source string (e.g. "0.0.0.0/0")
+      sources          - CIDR/source list (e.g. ["0.0.0.0/0"])
       action           - provider action, commonly "ALLOW" or "DENY"
   EOT
   type = list(object({
     direction   = string
     protocol    = string
     port_range  = string
-    sources     = string
+    sources     = set(string)
     action      = string
     description = optional(string)
   }))

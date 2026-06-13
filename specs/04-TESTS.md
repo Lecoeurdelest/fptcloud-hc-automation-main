@@ -211,8 +211,8 @@ Run with: `make test-integration` (pytest marker: `@pytest.mark.integration`)
 ### Executor integration
 
 - [x] **T-1101** — `terraform init` succeeds with real provider (offline cache) (phase: P2.T8)
-- [ ] **T-1102** — `terraform validate` passes for every module in `modules/` (phase: P2.T8)
-- [ ] **T-1103** — `terraform fmt -check` passes for every module (phase: P2.T8)
+- [x] **T-1102** — `terraform validate` passes for every module in `modules/` (phase: P2.T8)
+- [x] **T-1103** — `terraform fmt -check` passes for every module (phase: P2.T8)
 
 ### Producer → Queue → Worker pipeline
 
@@ -221,6 +221,9 @@ Run with: `make test-integration` (pytest marker: `@pytest.mark.integration`)
 - [ ] **T-1203** — Worker crash mid-task → Reaper reclaims → second worker finishes (phase: P5.T8)
 - [ ] **T-1204** — Worker encounters `transient` error → retry succeeds on attempt 2 (phase: P5.T4)
 - [ ] **T-1205** — Worker encounters `quota` error → straight to DLQ (phase: P5.T4)
+- [ ] **T-1206** — Live runner places non-ready post-apply resources in a pending queue and polls before verdict (phase: P5.T9)
+- [ ] **T-1207** — Live runner writes terminal failures to an error queue with resource and reason (phase: P5.T9)
+- [ ] **T-1208** — Live runner prevents resource conflicts with per-group locks and releases locks after destroy (phase: P5.T9)
 
 ### Database integration
 

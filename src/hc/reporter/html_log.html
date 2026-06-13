@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Health Check Progress</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f6f7f9;
+      color: #20242a;
+    }
+    body {
+      margin: 0;
+      padding: 32px;
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    .summary {
+      margin: 0 0 18px;
+      padding: 12px 14px;
+      border-left: 4px solid #2176d2;
+      background: #eef6ff;
+      color: #183a59;
+      font-size: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #ffffff;
+      border: 1px solid #d8dde6;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid #e6e9ef;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+    th {
+      background: #eef2f7;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .badge {
+      display: inline-block;
+      min-width: 72px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .ok { background: #dff4e8; color: #126437; }
+    .warn { background: #fff0c2; color: #735400; }
+    .error { background: #ffe0e0; color: #8a1f1f; }
+    .info { background: #dcecff; color: #174f8a; }
+    .empty td {
+      color: #687385;
+      text-align: center;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Health Check Progress</h1>
+    <p class="summary">$summary</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Stage</th>
+          <th>Status</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody>
+$rows
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

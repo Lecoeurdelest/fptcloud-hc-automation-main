@@ -25,7 +25,7 @@ variable "storage_policy_id" {
 variable "type" {
   description = "Storage type required by the FPT Cloud provider."
   type        = string
-  default     = "HDD"
+  default     = "EXTERNAL"
 }
 
 variable "instance_id" {
