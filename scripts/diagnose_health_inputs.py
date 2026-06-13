@@ -11,6 +11,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "runs" / "diagnostics"
+SPEC_PATH = ROOT / "specs" / "health-check.json"
 LOCK_CANDIDATES = [
     ROOT / "modules" / "subnet" / ".terraform.lock.hcl",
     ROOT / "runs" / "fptcloud-connect-check" / ".terraform.lock.hcl",
@@ -45,6 +46,13 @@ def provider_lock() -> dict[str, str]:
             "constraints": constraints.group(1) if constraints else "",
         }
     return {"lock_file": "", "source": "", "version": "", "constraints": ""}
+
+
+def spec_constants() -> dict[str, Any]:
+    try:
+        return json.loads(SPEC_PATH.read_text(encoding="utf-8")).get("constants", {})
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def vpc_values() -> list[str]:
@@ -124,6 +132,23 @@ def stage_inputs() -> dict[str, Any]:
                 "type": env("HC_SUBNET_TYPE", "NAT_ROUTED"),
                 "vpc_id": selected_vpc,
             },
+        },
+        "additional_subnet": {
+            "module_path": str(ROOT / "modules" / "subnet"),
+            "terraform_resource": "module.this.fptcloud_subnet.this",
+            "vars": {
+                "cidr": env("HC_ADDITIONAL_SUBNET_CIDR"),
+                "gateway_ip": env("HC_ADDITIONAL_SUBNET_GATEWAY"),
+                "vpc_id": selected_vpc,
+            },
+            "existing_subnet_cidrs": [
+                value.strip()
+                for value in env("HC_EXISTING_SUBNET_CIDRS").split(",")
+                if value.strip()
+            ],
+            "max_subnet_candidate_attempts": spec_constants().get("MAX_SUBNET_CANDIDATE_ATTEMPTS"),
+            "candidate_strategy": "deterministic increment by ten same-size network blocks, preserving gateway host offset",
+            "will_run": bool(env("HC_ADDITIONAL_SUBNET_CIDR") and env("HC_ADDITIONAL_SUBNET_GATEWAY")),
         },
         "vm": {
             "required_env": ["HC_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_UPSIZE_FLAVOR_NAME", "HC_SSH_KEY"],

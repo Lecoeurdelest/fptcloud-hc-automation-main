@@ -8,6 +8,7 @@ import sys
 import time
 import argparse
 import ipaddress
+import re
 import zipfile
 from dataclasses import asdict, dataclass
 from html import escape
@@ -63,6 +64,7 @@ SUBNET_VALIDATION_STAGE = "compute.validate-subnet-inputs"
 SUBNET_CREATE_STAGE = "compute.create-subnet"
 SUBNET_EVIDENCE_STAGE = "compute.collect-subnet-create-evidence"
 VPC_DISCOVERY_STAGE = "compute.discover-vpc"
+EXISTING_SUBNETS_STAGE = "network.discover-existing-subnets"
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,16 @@ class Check:
     blocked_by: tuple[str, ...] = ()
     retries: int = 0
     stop_group_on_success: str | None = None
+
+
+@dataclass(frozen=True)
+class CandidateState:
+    start_cidr: str
+    start_gateway: str
+    max_attempts: int
+    rejected_cidrs: tuple[str, ...] = ()
+    conflict_sources: tuple[str, ...] = ()
+    conflicting_subnets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +124,9 @@ class FailureContext:
     vpc_id: str
     reason: str
     classification: str
+    attempted_cidr: str = ""
+    attempted_gateway: str = ""
+    conflicting_subnet: str = ""
 
 
 events: list[dict[str, str]] = []
@@ -125,6 +140,7 @@ run_context: dict[str, str] = {
     "effective_vpc_id": "",
     "vpc_id_source": "unresolved",
 }
+existing_subnet_inventory: list[dict[str, str]] = []
 
 
 def env(name: str, default: str = "") -> str:
@@ -185,6 +201,20 @@ def load_spec(path: Path = SPEC_PATH) -> dict[str, StageSpec]:
     return stages
 
 
+def spec_constants(path: Path = SPEC_PATH) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("constants", {})
+
+
+def max_subnet_candidate_attempts() -> int:
+    value = spec_constants().get("MAX_SUBNET_CANDIDATE_ATTEMPTS")
+    try:
+        attempts = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, attempts)
+
+
 def runnable_spec(stage: StageSpec) -> tuple[bool, str]:
     if stage.automation_status != "automated":
         return False, f"Spec status is {stage.automation_status}, not automated"
@@ -241,6 +271,8 @@ def vpc_diagnostics_message(prefix: str = "VPC resolution") -> str:
 
 def classify_error(text: str, resource_type: str) -> str:
     lowered = text.lower()
+    if 'error_code":"804007' in lowered or "error_code=804007" in lowered or "804007" in lowered and "overlap" in lowered:
+        return "subnet_cidr_overlap"
     if (
         resource_type == "module.subnet"
         and stage_status.get(SUBNET_VALIDATION_STAGE) == "done"
@@ -258,6 +290,237 @@ def classify_error(text: str, resource_type: str) -> str:
     if "missing required" in lowered:
         return "configuration_missing"
     return "unknown"
+
+
+def conflicting_subnet_name(text: str) -> str:
+    match = re.search(r"\bin\s+([^,]+?)\s+subnet\b", text, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def existing_subnet_cidrs() -> list[str]:
+    return [value.strip() for value in env("HC_EXISTING_SUBNET_CIDRS").split(",") if value.strip()]
+
+
+def cidr_overlap(candidate: str, existing: list[str]) -> tuple[str, str]:
+    try:
+        candidate_network = ipaddress.ip_network(candidate, strict=True)
+    except ValueError as exc:
+        return "", f"candidate subnet CIDR is invalid: {exc}"
+    for raw in existing:
+        try:
+            existing_network = ipaddress.ip_network(raw, strict=True)
+        except ValueError as exc:
+            return raw, f"HC_EXISTING_SUBNET_CIDRS contains invalid CIDR {raw}: {exc}"
+        if candidate_network.overlaps(existing_network):
+            return raw, ""
+    return "", ""
+
+
+def next_subnet_candidate(cidr: str) -> str:
+    network = ipaddress.ip_network(cidr, strict=True)
+    if not isinstance(network, ipaddress.IPv4Network):
+        raise ValueError("only IPv4 subnet candidate generation is supported")
+    step = network.num_addresses * 10
+    next_address = int(network.network_address) + step
+    if next_address > int(ipaddress.IPv4Address("255.255.255.255")):
+        raise ValueError("candidate subnet generation exceeded IPv4 address space")
+    return str(ipaddress.ip_network(f"{ipaddress.IPv4Address(next_address)}/{network.prefixlen}", strict=True))
+
+
+def gateway_for_candidate(start_cidr: str, start_gateway: str, selected_cidr: str) -> str:
+    start_network = ipaddress.ip_network(start_cidr, strict=True)
+    selected_network = ipaddress.ip_network(selected_cidr, strict=True)
+    gateway_ip = ipaddress.ip_address(start_gateway)
+    offset = int(gateway_ip) - int(start_network.network_address)
+    if offset <= 0 or offset >= start_network.num_addresses - 1:
+        return str(next(selected_network.hosts()))
+    return str(ipaddress.ip_address(int(selected_network.network_address) + offset))
+
+
+@dataclass(frozen=True)
+class SubnetCandidateSelection:
+    selected_cidr: str
+    selected_gateway: str
+    candidate_attempt_count: int
+    rejected_cidrs: list[str]
+    overlap_reason: str
+    exhausted: bool = False
+    error: str = ""
+    conflict_source: str = ""
+    conflicting_subnet: str = ""
+
+
+def select_additional_subnet_candidate(
+    start_cidr: str,
+    start_gateway: str,
+    existing: list[str],
+    max_attempts: int,
+    prior_rejected: list[str] | None = None,
+    prior_sources: list[str] | None = None,
+    prior_conflicting_subnets: list[str] | None = None,
+) -> SubnetCandidateSelection:
+    rejected: list[str] = list(prior_rejected or [])
+    sources: list[str] = list(prior_sources or [])
+    conflicting_subnets: list[str] = list(prior_conflicting_subnets or [])
+    candidate = start_cidr
+    overlap_reason = ""
+    for attempt in range(1, max_attempts + 1):
+        if candidate in rejected:
+            candidate_source = sources[rejected.index(candidate)] if candidate in rejected and rejected.index(candidate) < len(sources) else "runtime_conflict"
+            candidate_conflict = conflicting_subnets[rejected.index(candidate)] if candidate in rejected and rejected.index(candidate) < len(conflicting_subnets) else ""
+            overlap_reason = f"{candidate} already rejected from {candidate_source}"
+            if candidate_conflict:
+                overlap_reason += f" by {candidate_conflict}"
+            if attempt < max_attempts:
+                try:
+                    candidate = next_subnet_candidate(candidate)
+                    continue
+                except ValueError as exc:
+                    return SubnetCandidateSelection("", "", attempt, rejected, overlap_reason, exhausted=True, error=str(exc))
+            return SubnetCandidateSelection("", "", attempt, rejected, overlap_reason, exhausted=True)
+        overlap, error = cidr_overlap(candidate, existing)
+        if error:
+            return SubnetCandidateSelection("", "", attempt, rejected, overlap_reason, error=error)
+        if not overlap:
+            gateway = gateway_for_candidate(start_cidr, start_gateway, candidate)
+            return SubnetCandidateSelection(candidate, gateway, attempt, rejected, overlap_reason)
+        rejected.append(candidate)
+        sources.append("preflight_inventory")
+        conflicting_subnets.append("")
+        overlap_reason = f"{candidate} overlaps existing subnet CIDR {overlap}"
+        if attempt < max_attempts:
+            try:
+                candidate = next_subnet_candidate(candidate)
+            except ValueError as exc:
+                return SubnetCandidateSelection("", "", attempt, rejected, overlap_reason, exhausted=True, error=str(exc))
+    return SubnetCandidateSelection("", "", max_attempts, rejected, overlap_reason, exhausted=True)
+
+
+def discover_existing_subnets(stage: StageSpec | None) -> None:
+    if not stage:
+        return
+    ok, reason = spec_preflight(stage)
+    if not ok:
+        emit(stage.id, "skipped", reason, ["subnet-inventory"])
+        return
+    existing_subnet_inventory.clear()
+    for cidr in existing_subnet_cidrs():
+        existing_subnet_inventory.append(
+            {
+                "name": "operator-provided",
+                "id": "",
+                "cidr": cidr,
+                "gateway": "",
+                "vpc_id": run_context.get("effective_vpc_id", ""),
+            }
+        )
+    if existing_subnet_inventory:
+        emit(
+            stage.id,
+            "done",
+            (
+                "Loaded existing subnet inventory from HC_EXISTING_SUBNET_CIDRS; "
+                f"cidrs={', '.join(item['cidr'] for item in existing_subnet_inventory)}; "
+                "provider_listing=not_available_in_runner"
+            ),
+            ["HC_EXISTING_SUBNET_CIDRS"],
+        )
+    else:
+        emit(
+            stage.id,
+            "done",
+            "No existing subnet inventory configured; provider/API listing is not available in this runner, so overlap can only be classified from provider errors.",
+            ["subnet-inventory"],
+        )
+
+
+def select_additional_subnet_vars(vars: dict[str, Any], state: CandidateState | None = None) -> tuple[dict[str, Any], str, CandidateState]:
+    cidr = state.start_cidr if state else str(vars.get("cidr") or "")
+    gateway = state.start_gateway if state else str(vars.get("gateway_ip") or "")
+    max_attempts = state.max_attempts if state else max_subnet_candidate_attempts()
+    existing = [item["cidr"] for item in existing_subnet_inventory if item.get("cidr")]
+    selected = dict(vars)
+    candidate_state = state or CandidateState(cidr, gateway, max_attempts)
+    if not existing and not candidate_state.rejected_cidrs:
+        emit(
+            "network.select-additional-subnet-cidr",
+            "done",
+            f"total_attempts=1; rejected_cidrs=[]; selected_cidr={cidr or '<unset>'}; overlap_reason=<none>; inventory=unavailable",
+            ["subnet-candidate-selection"],
+        )
+        return selected, "", candidate_state
+    selection = select_additional_subnet_candidate(
+        cidr,
+        gateway,
+        existing,
+        max_attempts,
+        list(candidate_state.rejected_cidrs),
+        list(candidate_state.conflict_sources),
+        list(candidate_state.conflicting_subnets),
+    )
+    rejected = ", ".join(selection.rejected_cidrs)
+    if selection.error and not selection.exhausted:
+        return selected, f"Classification: configuration_invalid; {selection.error}; attempted_cidr={cidr or '<unset>'}; attempted_gateway={gateway or '<unset>'}", candidate_state
+    prior_source_count = len(candidate_state.conflict_sources)
+    added_rejections = max(0, len(selection.rejected_cidrs) - prior_source_count)
+    updated_state = CandidateState(
+        cidr,
+        gateway,
+        max_attempts,
+        tuple(selection.rejected_cidrs),
+        tuple(candidate_state.conflict_sources + (("preflight_inventory",) * added_rejections)),
+        tuple(candidate_state.conflicting_subnets + (("",) * added_rejections)),
+    )
+    conflict_sources = ", ".join(updated_state.conflict_sources)
+    conflicting_subnets = ", ".join(value for value in updated_state.conflicting_subnets if value)
+    if selection.exhausted:
+        emit(
+            "network.select-additional-subnet-cidr",
+            "skipped",
+            (
+                f"total_attempts={selection.candidate_attempt_count}; rejected_cidrs=[{rejected}]; "
+                f"conflict_sources=[{conflict_sources}]; "
+                "selected_cidr=<none>; "
+                f"overlap_reason={selection.overlap_reason or selection.error or '<none>'}"
+            ),
+            ["subnet-candidate-selection"],
+        )
+        return selected, (
+            "Classification: subnet_cidr_exhausted; "
+            f"candidate_attempt_count={selection.candidate_attempt_count}; "
+            f"rejected_cidrs=[{rejected}]; "
+            f"conflict_sources=[{conflict_sources}]; "
+            f"overlap_reason={selection.overlap_reason or selection.error or '<none>'}; "
+            "skipping before Terraform apply"
+        ), updated_state
+    selected["cidr"] = selection.selected_cidr
+    selected["gateway_ip"] = selection.selected_gateway
+    emit(
+        "network.select-additional-subnet-cidr",
+        "done",
+        (
+            f"total_attempts={selection.candidate_attempt_count}; rejected_cidrs=[{rejected}]; "
+            f"conflict_sources=[{conflict_sources}]; "
+            f"conflicting_subnets=[{conflicting_subnets}]; "
+            f"selected_cidr={selection.selected_cidr}; selected_gateway={selection.selected_gateway}; "
+            f"overlap_reason={selection.overlap_reason or '<none>'}"
+        ),
+        ["subnet-candidate-selection"],
+    )
+    return selected, "", updated_state
+
+
+def append_provider_overlap(state: CandidateState, cidr: str, conflicting_subnet: str) -> CandidateState:
+    if cidr in state.rejected_cidrs:
+        return state
+    return CandidateState(
+        state.start_cidr,
+        state.start_gateway,
+        state.max_attempts,
+        state.rejected_cidrs + (cidr,),
+        state.conflict_sources + ("provider_error",),
+        state.conflicting_subnets + (conflicting_subnet,),
+    )
 
 
 def vpc_identifier_type(value: str) -> str:
@@ -492,8 +755,10 @@ def classify_context(
     address: str,
     module_path: Path,
     reason: str,
+    vars: dict[str, Any] | None = None,
 ) -> FailureContext:
     context = cloud_context()
+    vars = vars or {}
     return FailureContext(
         stage=stage,
         resource_type=resource_type,
@@ -504,11 +769,14 @@ def classify_context(
         vpc_id=context["vpc_id"],
         reason=reason,
         classification=classify_error(reason, resource_type),
+        attempted_cidr=str(vars.get("cidr") or ""),
+        attempted_gateway=str(vars.get("gateway_ip") or ""),
+        conflicting_subnet=conflicting_subnet_name(reason),
     )
 
 
 def format_failure(context: FailureContext) -> str:
-    return (
+    details = (
         f"{context.reason}\n"
         f"Classification: {context.classification}\n"
         f"Resource type: {context.resource_type}\n"
@@ -517,6 +785,16 @@ def format_failure(context: FailureContext) -> str:
         f"Tenant: {context.tenant or '<unset>'}; Region: {context.region or '<unset>'}; "
         f"VPC: {context.vpc_id or '<unset>'}"
     )
+    if context.attempted_cidr or context.attempted_gateway:
+        details += (
+            f"\nAttempted subnet CIDR: {context.attempted_cidr or '<unset>'}; "
+            f"Attempted gateway: {context.attempted_gateway or '<unset>'}"
+        )
+    if context.conflicting_subnet:
+        details += f"\nConflicting subnet: {context.conflicting_subnet}"
+    if context.classification == "subnet_cidr_overlap":
+        details += "\nFailure type: input/environment conflict; choose an unused subnet CIDR/gateway inside the VPC range."
+    return details
 
 
 def write_queues() -> None:
@@ -934,6 +1212,10 @@ def wait_for_pending() -> None:
 
 
 def execute(check: Check) -> None:
+    if check.name == "network.additional-subnet":
+        execute_additional_subnet(check)
+        return
+
     resources = [f"module.{check.module}"]
     ok, reason = preflight(check)
     if not ok:
@@ -960,6 +1242,7 @@ def execute(check: Check) -> None:
                     address="terraform.init",
                     module_path=module_path,
                     reason=(init.stderr or init.stdout)[-1200:],
+                    vars=check.vars,
                 )
                 queue_error(check.name, workspace, resources, format_failure(context))
                 return
@@ -977,6 +1260,7 @@ def execute(check: Check) -> None:
                     address=", ".join(planned) or "terraform.plan",
                     module_path=module_path,
                     reason=(plan.stderr or plan.stdout)[-1200:],
+                    vars=check.vars,
                 )
                 queue_error(check.name, workspace, planned or resources, format_failure(context))
                 destroy(workspace, check.name)
@@ -1027,6 +1311,7 @@ def execute(check: Check) -> None:
                     address=", ".join(current) or ", ".join(planned) or "terraform.apply",
                     module_path=module_path,
                     reason=raw_reason,
+                    vars=check.vars,
                 )
                 reason = format_failure(context)
                 if attempt < attempts:
@@ -1035,6 +1320,169 @@ def execute(check: Check) -> None:
                 else:
                     queue_error(check.name, workspace, current, reason)
             destroy(workspace, check.name)
+    except RuntimeError as exc:
+        queue_error(check.name, workspace, resources, str(exc))
+
+
+def execute_additional_subnet(check: Check) -> None:
+    resources = [f"module.{check.module}"]
+    ok, reason = preflight(check)
+    if not ok:
+        emit(check.name, "skipped", reason, resources)
+        return
+
+    module_path = MODULES / check.module
+    candidate_state = CandidateState(
+        str(check.vars.get("cidr") or ""),
+        str(check.vars.get("gateway_ip") or ""),
+        max_subnet_candidate_attempts(),
+    )
+    current_vars = dict(check.vars)
+    workspace = RUN_ROOT / check.name
+    try:
+        with ResourceLock(check.name):
+            while True:
+                current_vars, selection_error, candidate_state = select_additional_subnet_vars(current_vars, candidate_state)
+                if selection_error:
+                    emit(check.name, "skipped", selection_error, ["subnet-candidate-selection"])
+                    return
+
+                attempt_number = len(candidate_state.rejected_cidrs) + 1
+                emit(
+                    f"{check.name}:attempt",
+                    "started",
+                    (
+                        f"attempt={attempt_number}; candidate_cidr={current_vars.get('cidr')}; "
+                        f"gateway={current_vars.get('gateway_ip')}; rejected_cidrs=[{', '.join(candidate_state.rejected_cidrs)}]"
+                    ),
+                    resources,
+                )
+
+                attempt_check = Check(
+                    name=check.name,
+                    module=check.module,
+                    vars=current_vars,
+                    required_vars=check.required_vars,
+                    retries=0,
+                )
+                workspace = write_workspace(attempt_check)
+                emit(
+                    f"{check.name}:context",
+                    "done",
+                    f"Using effective_vpc_id={current_vars.get('vpc_id') or '<unset>'}; vpc_id_source={run_context.get('vpc_id_source', 'unresolved')}",
+                    resources,
+                )
+                if (workspace / ".terraform").exists():
+                    emit(check.name, "started", "Reusing initialized Terraform workspace", resources)
+                else:
+                    emit(check.name, "started", "Initializing Terraform workspace", resources)
+                    init = run(["terraform", "init", "-input=false", "-no-color"], workspace, stage=f"{check.name}-init")
+                    if init.returncode != 0:
+                        context = classify_context(
+                            stage=check.name,
+                            resource_type=f"module.{check.module}",
+                            address="terraform.init",
+                            module_path=module_path,
+                            reason=(init.stderr or init.stdout)[-1200:],
+                            vars=current_vars,
+                        )
+                        queue_error(check.name, workspace, resources, format_failure(context))
+                        return
+
+                plan = run(
+                    ["terraform", "plan", "-out=tfplan", "-detailed-exitcode", "-no-color", "-input=false"],
+                    workspace,
+                    stage=f"{check.name}-plan",
+                )
+                planned = planned_resources(workspace)
+                if plan.returncode not in (0, 2):
+                    context = classify_context(
+                        stage=check.name,
+                        resource_type=f"module.{check.module}",
+                        address=", ".join(planned) or "terraform.plan",
+                        module_path=module_path,
+                        reason=(plan.stderr or plan.stdout)[-1200:],
+                        vars=current_vars,
+                    )
+                    queue_error(check.name, workspace, planned or resources, format_failure(context))
+                    destroy(workspace, check.name)
+                    return
+                emit(check.name, "pending", "Plan completed; resources will be created/updated", planned or resources)
+                emit(
+                    f"{check.name}:inputs",
+                    "done",
+                    (
+                        "Subnet apply inputs: "
+                        f"subnet_name={current_vars.get('name')}; "
+                        f"subnet_cidr={current_vars.get('cidr')}; "
+                        f"subnet_gateway={current_vars.get('gateway_ip')}; "
+                        f"vpc_id={current_vars.get('vpc_id')}; "
+                        f"vpc_identifier_type={vpc_identifier_type(str(current_vars.get('vpc_id') or ''))}; "
+                        f"region={env('FPTCLOUD_REGION') or '<unset>'}; "
+                        f"tenant={env('FPTCLOUD_TENANT_NAME') or '<unset>'}; "
+                        f"terraform_vars={json.dumps(current_vars, sort_keys=True)}"
+                    ),
+                    ["module.this.fptcloud_subnet.this"],
+                )
+
+                apply = run(
+                    ["terraform", "apply", "-auto-approve", "-no-color", "-input=false", "tfplan"],
+                    workspace,
+                    stage=f"{check.name}-apply-attempt-{attempt_number}",
+                )
+                current = state_resources(workspace) or planned or resources
+                if apply.returncode == 0:
+                    emit(check.name, "passed", f"Apply succeeded on candidate attempt {attempt_number}; settling briefly", current)
+                    time.sleep(SETTLE_SECONDS)
+                    ready, ready_reason, current = readiness(workspace)
+                    if ready:
+                        emit(check.name, "ready", ready_reason, current or planned or resources)
+                    else:
+                        queue_pending(check.name, workspace, current or planned or resources, ready_reason)
+                        wait_for_pending()
+                    destroy(workspace, check.name)
+                    return
+
+                raw_reason = f"Apply attempt {attempt_number} failed: {(apply.stderr or apply.stdout)[-1000:]}"
+                context = classify_context(
+                    stage=check.name,
+                    resource_type=f"module.{check.module}",
+                    address=", ".join(current) or ", ".join(planned) or "terraform.apply",
+                    module_path=module_path,
+                    reason=raw_reason,
+                    vars=current_vars,
+                )
+                reason = format_failure(context)
+                if context.classification != "subnet_cidr_overlap":
+                    queue_error(check.name, workspace, current, reason)
+                    destroy(workspace, check.name)
+                    return
+
+                emit(
+                    f"{check.name}:overlap-detected",
+                    "retry",
+                    (
+                        f"attempt={attempt_number}; candidate_cidr={current_vars.get('cidr')}; "
+                        f"gateway={current_vars.get('gateway_ip')}; conflict_source=provider_error; "
+                        f"conflicting_subnet={context.conflicting_subnet or '<unknown>'}; classification=subnet_cidr_overlap"
+                    ),
+                    current,
+                )
+                destroy(workspace, check.name)
+                candidate_state = append_provider_overlap(candidate_state, str(current_vars.get("cidr") or ""), context.conflicting_subnet)
+                if len(candidate_state.rejected_cidrs) >= candidate_state.max_attempts:
+                    emit(
+                        check.name,
+                        "failed",
+                        (
+                            "Classification: subnet_cidr_exhausted; "
+                            f"candidate_attempt_count={len(candidate_state.rejected_cidrs)}; "
+                            f"rejected_cidrs=[{', '.join(candidate_state.rejected_cidrs)}]; "
+                            "max attempts reached after provider overlap feedback"
+                        ),
+                        ["subnet-candidate-selection"],
+                    )
+                    return
     except RuntimeError as exc:
         queue_error(check.name, workspace, resources, str(exc))
 
@@ -1149,12 +1597,30 @@ def checks(stage_filter: str | None = None) -> list[Check]:
             if subnet_id:
                 stage_status[subnet_stage.id] = "done"
 
+    discover_existing_subnets(spec.get(EXISTING_SUBNETS_STAGE))
+
     instance_id = env("HC_INSTANCE_ID")
     backup_regions = [
         value.strip()
         for value in env("HC_ENABLED_OBJECT_REGIONS", env("HC_OBJECT_REGION", "")).split(",")
         if value.strip()
     ]
+    additional_subnet_vars = {
+        "name": f"hc-extra-net-{suffix}",
+        "cidr": env("HC_ADDITIONAL_SUBNET_CIDR"),
+        "gateway_ip": env("HC_ADDITIONAL_SUBNET_GATEWAY"),
+        "type": env("HC_SUBNET_TYPE", "NAT_ROUTED"),
+        "vpc_id": vpc_id,
+    }
+    additional_subnet_check: Check | None = None
+    if "network.additional-subnet" in spec:
+        additional_subnet_check = check_from_spec(
+            spec["network.additional-subnet"],
+            module="subnet",
+            vars=additional_subnet_vars,
+            required_vars=("vpc_id", "cidr", "gateway_ip"),
+        )
+
     candidate_checks: list[Check | None] = [
         check_from_spec(
             spec[SUBNET_CREATE_STAGE],
@@ -1210,20 +1676,7 @@ def checks(stage_filter: str | None = None) -> list[Check]:
         )
         if "compute.add-disk" in spec
         else None,
-        check_from_spec(
-            spec["network.additional-subnet"],
-            module="subnet",
-            vars={
-                "name": f"hc-extra-net-{suffix}",
-                "cidr": env("HC_ADDITIONAL_SUBNET_CIDR", "10.136.10.0/24"),
-                "gateway_ip": env("HC_ADDITIONAL_SUBNET_GATEWAY", "10.136.10.1"),
-                "type": env("HC_SUBNET_TYPE", "NAT_ROUTED"),
-                "vpc_id": vpc_id,
-            },
-            required_vars=("vpc_id",),
-        )
-        if "network.additional-subnet" in spec
-        else None,
+        additional_subnet_check,
     ]
     base_checks = [check for check in candidate_checks if check]
 

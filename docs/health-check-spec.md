@@ -4,6 +4,10 @@ This document defines the source-of-truth behavior for the FPT Cloud daily
 health-check automation. Implementation must follow `specs/health-check.json`.
 Behavior changes start in the spec before code changes.
 
+## Constants
+
+- `MAX_SUBNET_CANDIDATE_ATTEMPTS = 100`
+
 ## Execution Rules
 
 - Only stages present in `specs/health-check.json` may run.
@@ -20,6 +24,36 @@ Behavior changes start in the spec before code changes.
   ID can be resolved, dependent stages are skipped with a clear reason.
 - Diagnostics must print `vpc_name`, `explicit_vpc_id`, `discovered_vpc_id`,
   `effective_vpc_id`, and `vpc_id_source`.
+- Subnet stages must reject overlapping CIDRs locally when existing subnet CIDRs
+  are available from discovery/listing. When existing CIDRs are not available,
+  Terraform apply may proceed, but provider `error_code=804007` must be
+  classified as `subnet_cidr_overlap`, reported as an input/environment
+  conflict, and must not be retried with guessed CIDRs.
+- `network.discover-existing-subnets` must run before
+  `network.additional-subnet`. It should collect subnet name, subnet ID, CIDR,
+  gateway, and VPC ID when provider/API listing is available. If listing is not
+  available, it may use operator-provided `HC_EXISTING_SUBNET_CIDRS`; it must
+  not guess subnet ranges.
+- Additional subnet CIDR selection must read `MAX_SUBNET_CANDIDATE_ATTEMPTS`
+  from `specs/health-check.json`. It starts with `HC_ADDITIONAL_SUBNET_CIDR`;
+  on overlap, it appends the rejected CIDR to diagnostics and deterministically
+  increments to the next predictable network block of the same prefix length
+  such as `10.136.10.0/24`, `10.136.20.0/24`, `10.136.30.0/24`. It must emit
+  `network.select-additional-subnet-cidr` with total attempts, rejected CIDRs,
+  selected CIDR, and overlap reason.
+- CIDR selection must never exceed `MAX_SUBNET_CANDIDATE_ATTEMPTS`. If the
+  limit is reached, classify `subnet_cidr_exhausted`, skip Terraform apply,
+  create no resources, and report all attempted CIDRs.
+- If `network.additional-subnet` Terraform apply fails with explicit provider
+  overlap `error_code=804007`, classify `subnet_cidr_overlap`, extract the
+  attempted CIDR and conflicting subnet name when available, append the
+  attempted CIDR to the runtime conflict list with `conflict_source=provider_error`,
+  destroy/cleanup partial resources, select the next non-overlapping candidate,
+  and retry. Do not retry unknown errors or provider/backend system errors.
+- Report events required for the feedback loop:
+  `network.additional-subnet:attempt`,
+  `network.additional-subnet:overlap-detected`, and
+  `network.select-additional-subnet-cidr` for each selected candidate.
 - No real resources may be created unless cleanup behavior is defined.
 - Terraform stdout and stderr must be preserved per stage.
 - Cleanup must be idempotent.
@@ -56,7 +90,8 @@ Behavior changes start in the spec before code changes.
 | `network.security-group` | Create security group allowing only RDP 3389 and SSH 22 | automated | true | `HC_SUBNET_ID` | `compute.discover-vpc`, `compute.discover-subnet` | Terraform destroy |
 | `network.blocked-ports` | Verify blocked ports cannot connect | manual_only | false | Reachable VM network path | `network.security-group` | None |
 | `network.outbound-http-https` | Add outbound rules for HTTP/HTTPS 80/443 | blocked | false | `HC_VPC_ID`, `HC_SUBNET_ID` | `network.security-group` | Destroy security group |
-| `network.additional-subnet` | Create additional subnet 10.136.10.0/24 | automated | true | None | `compute.discover-vpc` | Terraform destroy |
+| `network.discover-existing-subnets` | Discover existing subnet inventory before additional subnet creation | automated | true | None | `compute.discover-vpc` | No resources created |
+| `network.additional-subnet` | Create additional subnet from configured non-overlapping CIDR | automated | true | `HC_ADDITIONAL_SUBNET_CIDR`, `HC_ADDITIONAL_SUBNET_GATEWAY` | `compute.discover-vpc`, `network.discover-existing-subnets` | Terraform destroy |
 | `network.additional-nic` | Add additional NIC to VM and verify inside OS | unsupported | false | None | `network.additional-subnet` | Manual |
 | `backup.vm-backup-restore` | Create file, backup, restore, verify file | unsupported | false | None | None | Manual |
 | `object-storage.bucket` | Create bucket, upload file, create folder, open file, connect S3 endpoint, delete file, delete bucket | partially_automated | true | `HC_ENABLED_OBJECT_REGIONS` | None | Terraform destroy |
@@ -81,6 +116,10 @@ The remaining root failures are:
 - `module.this.fptcloud_subnet.this`: `UnknownError: System error`. After
   `compute.validate-subnet-inputs` passes local checks, classify this as
   `provider_or_backend_system_error_after_valid_inputs`.
+- `module.this.fptcloud_subnet.this`: provider `error_code=804007` with an
+  overlap message is classified as `subnet_cidr_overlap`. This is an
+  input/environment conflict, not a provider/backend failure. The report should
+  include the attempted CIDR/gateway and conflicting subnet name when available.
 
 These require either explicit internal IDs or FPT Cloud provider/API support.
 
@@ -95,6 +134,24 @@ include DNS IPs, static IP pool, and tags. The provider describes `type` values
 CIDR syntax, gateway IP syntax, gateway membership inside the CIDR, gateway not
 being the network or broadcast address, VPC identifier shape, region/tenant
 presence, and the exact Terraform variables passed to `module.subnet`.
+
+`network.additional-subnet` must not silently default to any CIDR in a
+production daily run. It requires `HC_ADDITIONAL_SUBNET_CIDR` and
+`HC_ADDITIONAL_SUBNET_GATEWAY`; sample `.env` values are examples only. In the
+current environment, `10.136.10.0/24` overlaps `Dungnt416Network` and
+`10.136.20.0/24` overlaps `subnet-testmnt-zla1k9l4` in `FCI-L1-HAN-VPC`.
+
+When `HC_EXISTING_SUBNET_CIDRS` is configured, its comma-separated CIDRs are
+treated as local inventory and the additional subnet selector must choose the
+first non-overlapping deterministic candidate before Terraform apply. The
+selected CIDR replaces the stage's `cidr` variable; the selected gateway is
+derived by preserving the configured gateway host offset inside the selected
+candidate network.
+
+`HC_EXISTING_SUBNET_CIDRS` is best-effort. If it is incomplete and the provider
+returns `error_code=804007`, the runner adds the attempted CIDR to the runtime
+conflict list, records `conflict_source=provider_error`, and retries the next
+deterministic candidate until success or `MAX_SUBNET_CANDIDATE_ATTEMPTS`.
 
 The following cannot be proven without a working FPT Cloud API response or
 support confirmation: whether the subnet CIDR is inside the VPC CIDR unless

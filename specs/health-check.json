@@ -1,11 +1,29 @@
 {
   "version": 1,
+  "constants": {
+    "MAX_SUBNET_CANDIDATE_ATTEMPTS": 100
+  },
   "statuses": [
     "automated",
     "partially_automated",
     "manual_only",
     "blocked",
     "unsupported"
+  ],
+  "failure_classifications": [
+    "manual_validation_required",
+    "provider_or_backend_system_error",
+    "provider_endpoint_or_datasource_mismatch",
+    "configuration_invalid",
+    "provider_or_backend_system_error_after_valid_inputs",
+    "provider_support_evidence_collected",
+    "configuration_missing",
+    "unsupported_provider_operation",
+    "blocked_missing_subnet_id",
+    "object_storage_region_disabled",
+    "subnet_cidr_overlap",
+    "subnet_cidr_overlap_preflight",
+    "subnet_cidr_exhausted"
   ],
   "stages": [
     {
@@ -373,16 +391,29 @@
       "safe_for_daily_run": false
     },
     {
-      "id": "network.additional-subnet",
-      "manual_check_item": "Create additional subnet 10.136.10.0/24",
+      "id": "network.discover-existing-subnets",
+      "manual_check_item": "Discover existing subnet inventory before additional subnet creation",
       "automation_status": "automated",
       "required_inputs": [],
+      "required_cloud_resources": ["Existing VPC"],
+      "expected_result": "Existing subnet names, IDs, CIDRs, gateways, and VPC IDs are collected when provider/API listing or HC_EXISTING_SUBNET_CIDRS is available.",
+      "validation_method": "Attempt to collect existing subnet CIDRs in the effective VPC. If provider/API subnet listing is available, collect subnet name, subnet ID, CIDR, gateway, and VPC ID. If listing is unavailable, use HC_EXISTING_SUBNET_CIDRS as operator-provided inventory. Do not guess subnet ranges.",
+      "cleanup_behavior": "No resources are created.",
+      "dependency_stages": ["compute.discover-vpc"],
+      "failure_classification": "subnet_cidr_overlap_preflight",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "network.additional-subnet",
+      "manual_check_item": "Create additional subnet from configured non-overlapping CIDR",
+      "automation_status": "automated",
+      "required_inputs": ["HC_ADDITIONAL_SUBNET_CIDR", "HC_ADDITIONAL_SUBNET_GATEWAY"],
       "required_cloud_resources": ["VPC"],
       "expected_result": "Temporary additional subnet is created.",
-      "validation_method": "Terraform subnet module with HC_ADDITIONAL_SUBNET_CIDR.",
+      "validation_method": "Terraform subnet module with explicit HC_ADDITIONAL_SUBNET_CIDR and HC_ADDITIONAL_SUBNET_GATEWAY. Select the additional subnet CIDR using MAX_SUBNET_CANDIDATE_ATTEMPTS from spec constants. Start with HC_ADDITIONAL_SUBNET_CIDR, validate against discovered existing subnet CIDRs, append overlaps to rejected_cidrs with conflict_source=preflight_inventory, then deterministically increment to the next predictable network block of the same prefix length. Emit network.select-additional-subnet-cidr with candidate_attempt_count, rejected_cidrs, selected_cidr, and overlap_reason. Emit network.additional-subnet:attempt before each apply and network.additional-subnet:overlap-detected when provider error_code=804007 is returned. If Terraform apply fails with explicit subnet overlap error_code=804007, extract attempted CIDR and conflicting subnet name when available, append the attempted CIDR to the runtime conflict list with conflict_source=provider_error, destroy/cleanup any partial resources, select the next non-overlapping candidate, and retry. Stop when subnet creation succeeds or MAX_SUBNET_CANDIDATE_ATTEMPTS is reached. Do not retry unknown errors or provider/backend system errors. If the limit is reached, skip/stop Terraform apply with subnet_cidr_exhausted and report all attempted CIDRs.",
       "cleanup_behavior": "Always run terraform destroy for the stage workspace.",
-      "dependency_stages": ["compute.discover-vpc"],
-      "failure_classification": "provider_or_backend_system_error",
+      "dependency_stages": ["compute.discover-vpc", "network.discover-existing-subnets"],
+      "failure_classification": "subnet_cidr_overlap",
       "safe_for_daily_run": true
     },
     {

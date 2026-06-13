@@ -125,6 +125,46 @@ not overlap an existing subnet. This repository cannot prove those two facts
 unless FPT Cloud exposes the VPC/subnet inventory successfully; set
 `HC_VPC_CIDR` when known so local validation can check containment.
 
+For `network.additional-subnet`, set an unused CIDR explicitly. Get subnet
+inventory from the FPT Cloud portal or API first when possible. Known conflicts
+in the current `FCI-L1-HAN-VPC` environment:
+
+- `10.136.10.0/24` conflicts with `Dungnt416Network`.
+- `10.136.20.0/24` conflicts with `subnet-testmnt-zla1k9l4`.
+
+```powershell
+$env:HC_VPC_CIDR="<vpc-cidr>"
+$env:HC_EXISTING_SUBNET_CIDRS="10.136.10.0/24,10.136.20.0/24"
+$env:HC_ADDITIONAL_SUBNET_CIDR="<unused-cidr>"
+$env:HC_ADDITIONAL_SUBNET_GATEWAY="<first-usable-ip>"
+```
+
+Pick a CIDR inside the VPC range that does not overlap any existing subnet, and
+use the first usable IP in that CIDR as the gateway unless your network design
+requires a different valid host IP. If `HC_EXISTING_SUBNET_CIDRS` is configured,
+the runner uses deterministic candidate selection before Terraform apply.
+
+The selection starts with `HC_ADDITIONAL_SUBNET_CIDR`. On overlap, it records
+the rejected CIDR and increments by ten same-size network blocks, preserving the
+gateway host offset. For example:
+
+```text
+10.136.10.0/24 -> 10.136.20.0/24 -> 10.136.30.0/24
+```
+
+The attempt limit is the spec constant `MAX_SUBNET_CANDIDATE_ATTEMPTS`, currently
+`100` in `specs/health-check.json`. If no non-overlapping CIDR is found before
+that limit, the runner skips Terraform apply with `subnet_cidr_exhausted` and
+reports every rejected CIDR. The runner does not use random CIDRs.
+
+`HC_EXISTING_SUBNET_CIDRS` is best-effort inventory. If it misses an existing
+subnet and the provider returns explicit overlap `error_code=804007`, the runner
+adds that attempted CIDR to the runtime conflict list with
+`conflict_source=provider_error`, records the conflicting subnet name when the
+message includes it, and tries the next deterministic candidate. It retries only
+subnet overlap errors; unknown errors and provider/backend system errors are not
+retried.
+
 Keep `FPTCLOUD_REGION` and `FPTCLOUD_TENANT_NAME` aligned with the VPC. Current
 provider schema documents `FPTCLOUD_REGION` values as `VN/HAN`, `VN/SGN`, and
 `JP/JCSI2`, but it does not clarify whether `vpc_id` means VPC UUID, IaaS
