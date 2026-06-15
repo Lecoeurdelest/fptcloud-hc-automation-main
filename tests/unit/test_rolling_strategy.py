@@ -444,8 +444,8 @@ class TestImportUnsupportedHardStop:
             import_stderr="import is not supported by this provider resource",
         )
 
-        with patch.object(mod, "emit", side_effect=capture_emit), \
-             patch.object(mod, "run", side_effect=fake_run):
+        with patch.object(mod.terraform_executor, "emit", side_effect=capture_emit), \
+             patch.object(mod.terraform_executor, "run", side_effect=fake_run):
             result = mod.terraform_reclaim_import_destroy(  # type: ignore[attr-defined]
                 "inst-001", "vpc-aaa", workspace
             )
@@ -493,8 +493,8 @@ class TestImportUnsupportedHardStop:
             import_stderr="timeout connecting to API",
         )
 
-        with patch.object(mod, "emit", MagicMock()), \
-             patch.object(mod, "run", side_effect=fake_run):
+        with patch.object(mod.terraform_executor, "emit", MagicMock()), \
+             patch.object(mod.terraform_executor, "run", side_effect=fake_run):
             result = mod.terraform_reclaim_import_destroy(  # type: ignore[attr-defined]
                 "inst-001", "vpc-aaa", workspace
             )
