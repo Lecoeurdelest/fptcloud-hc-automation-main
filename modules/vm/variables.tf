@@ -51,6 +51,7 @@ variable "storage_policy_id" {
 variable "ssh_key" {
   description = "SSH key name or ID used to provision the instance."
   type        = string
+  default     = null
 }
 
 variable "password" {
@@ -80,4 +81,10 @@ variable "security_group_ids" {
   description = "Security group IDs to associate with the VM."
   type        = set(string)
   default     = []
+}
+
+variable "tags" {
+  description = "Key-value tags to apply to the instance via fptcloud_tagging resources."
+  type        = map(string)
+  default     = {}
 }

@@ -1,12 +1,418 @@
 {
   "version": 1,
   "constants": {
-    "MAX_SUBNET_CANDIDATE_ATTEMPTS": 100
+    "MAX_SUBNET_CANDIDATE_ATTEMPTS": 100,
+    "COLLECTED_INSTANCE_STORAGE_POLICIES": [
+      {
+        "name": "Premium-SSD",
+        "id": "9fe95650-d902-4613-ad5a-88c94c71d725",
+        "id_db": ""
+      },
+      {
+        "name": "Premium-SSD-4000",
+        "id": "4eb45908-f30b-4a18-820e-2e2e52d8840a",
+        "id_db": ""
+      },
+      {
+        "name": "Premium-SSD-10000",
+        "id": "3b25992b-9f0c-4949-80e9-894b54306aad",
+        "id_db": ""
+      },
+      {
+        "name": "Premium-Template",
+        "id": "2e105fae-9a89-4f9a-9786-fa3a4676d462",
+        "id_db": ""
+      }
+    ],
+    "INSTANCE_STORAGE_POLICY_SELECTION": {
+      "preferred_name": "Premium-SSD",
+      "match_policy": "exact_name_only",
+      "provider_field_used": "storage_policy_id",
+      "provider_value_field": "id",
+      "debug_only_fields": [
+        "id_db"
+      ],
+      "source_on_match": "preferred_exact_name",
+      "failure_classification": "storage_policy_preferred_not_found"
+    },
+    "INSTANCE_STORAGE_POLICY_FALLBACK": {
+      "enabled": false,
+      "on_classification": "instance_storage_quota_exceeded",
+      "from": "Premium-SSD",
+      "to": "Premium-SSD-4000",
+      "max_fallback_attempts": 0,
+      "disabled_reason": "Optimistic quota apply only: quota exceeded stops and waits for explicit user confirmation."
+    },
+    "INSTANCE_CLEANUP_POLICY": {
+      "cleanup_policy": "retain_by_default",
+      "HC_KEEP_INSTANCE_default": true,
+      "HC_CLEANUP_ON_QUOTA_EXCEEDED_default": false,
+      "delete_triggers": [],
+      "delete_requires": [
+        "explicit user confirmation for cleanup",
+        "instance_id exists",
+        "instance was created by current run",
+        "instance name matches current run suffix",
+        "instance is managed by current run workspace",
+        "delete reason is quota cleanup"
+      ],
+      "delete_scope": "No automatic deletion is allowed after quota exceeded. Cleanup requires explicit user confirmation and must never target discovered/shared resources or instances not created by this run.",
+      "reporting": [
+        "cleanup_policy",
+        "keep_instance",
+        "cleanup_on_quota_exceeded",
+        "delete_allowed",
+        "delete_reason",
+        "retained_instance_ids",
+        "deleted_instance_ids",
+        "skipped_delete_reason"
+      ]
+    },
+    "INSTANCE_QUOTA_BEHAVIOR": {
+      "quota_precheck": "disabled",
+      "quota_assumption": "assume_sufficient",
+      "quota_exceeded_action": "stop_and_wait_for_user",
+      "run_status_on_quota_exceeded": "blocked_waiting_user_confirmation",
+      "user_action_required_on_quota_exceeded": true
+    },
+    "INSTANCE_PROVIDER_ERROR_BEHAVIOR": {
+      "applies_when": "Terraform/provider returns a non-quota error during instance creation. Classification: instance_provider_error.",
+      "classification": "instance_provider_error",
+      "instance_disposition": "Retained per INSTANCE_CLEANUP_POLICY.retain_by_default. retain_instance() is called; emits retained_failed_instance event.",
+      "remaining_images": "Continued. On first-pass failure the case is enqueued and the loop continues to the next image. After the first pass completes, queued failures are retried per INSTANCE_ERROR_QUEUE_RETRY_POLICY.",
+      "run_blocked": false,
+      "run_status_unchanged": true,
+      "run_status_not_set_to": "blocked_waiting_user_confirmation",
+      "user_action_required": false,
+      "main_workflow_continues": true,
+      "retry_policy": "See INSTANCE_ERROR_QUEUE_RETRY_POLICY. Non-quota failures are enqueued for retry rather than immediately reported as final failures.",
+      "note": "After all first-pass images are attempted, the retry phase processes the error queue. Subsequent non-instance checks run after the retry phase completes. This differs from quota-exceeded behavior where run_blocked=true stops the entire workflow.",
+      "contrast_with_quota_exceeded": {
+        "quota_exceeded_sets_run_blocked": true,
+        "quota_exceeded_sets_run_status": "blocked_waiting_user_confirmation",
+        "quota_exceeded_sets_user_action_required": true,
+        "quota_exceeded_stops_entire_workflow": true,
+        "instance_provider_error_stops_entire_workflow": false
+      },
+      "failure_event_fields": [
+        "check.name",
+        "status=failed",
+        "classification",
+        "error_code",
+        "terraform_error",
+        "image_label",
+        "image_name",
+        "remaining_images_not_attempted",
+        "user_action_required"
+      ]
+    },
+    "INSTANCE_ERROR_QUEUE_RETRY_POLICY": {
+      "enabled": true,
+      "applies_to": "non_quota_instance_create_failure",
+      "does_not_apply_to": "quota_exceeded",
+      "max_attempts_per_case": 3,
+      "attempt_counting": "original_attempt_counts_as_attempt_1",
+      "queue_name": "instance_error_queue",
+      "first_pass_behavior": "enqueue_failed_case_and_continue",
+      "retry_phase": "after_initial_instance_matrix_pass",
+      "retry_order": "original_failure_order",
+      "on_retry_success": "remove_from_queue_and_emit_success",
+      "on_retry_exhausted": "keep_final_failure_and_emit_exhausted",
+      "workflow_continuation": "continue_after_retry_phase_unless_quota_exceeded",
+      "cleanup_policy": "follow_INSTANCE_CLEANUP_POLICY",
+      "quota_during_retry": "stop_immediately_same_as_first_pass",
+      "resolve_error_behavior": "not_retried_continue_to_next_image",
+      "event_schemas": {
+        "instance.create_failed_queued": {
+          "description": "Emitted when a non-quota instance creation failure is enqueued for retry during the first pass.",
+          "required_fields": [
+            "image_label",
+            "image_name",
+            "attempt",
+            "max_attempts",
+            "classification",
+            "error_code",
+            "terraform_error",
+            "queued",
+            "remaining_retry_attempts"
+          ]
+        },
+        "instance.retry_started": {
+          "description": "Emitted before each retry attempt.",
+          "required_fields": [
+            "image_label",
+            "image_name",
+            "attempt",
+            "max_attempts",
+            "queue_position"
+          ]
+        },
+        "instance.retry_succeeded": {
+          "description": "Emitted when a retry attempt creates the instance successfully.",
+          "required_fields": [
+            "image_label",
+            "image_name",
+            "attempt",
+            "max_attempts",
+            "removed_from_queue",
+            "instance_retained"
+          ]
+        },
+        "instance.retry_failed": {
+          "description": "Emitted when a retry attempt fails but attempts remain.",
+          "required_fields": [
+            "image_label",
+            "image_name",
+            "attempt",
+            "max_attempts",
+            "classification",
+            "error_code",
+            "terraform_error",
+            "remaining_retry_attempts"
+          ]
+        },
+        "instance.retry_exhausted": {
+          "description": "Emitted when all max_attempts_per_case attempts have failed.",
+          "required_fields": [
+            "image_label",
+            "image_name",
+            "attempt",
+            "max_attempts",
+            "classification",
+            "error_code",
+            "terraform_error",
+            "final_failure",
+            "user_action_required"
+          ]
+        }
+      }
+    },
+    "INSTANCE_QUOTA_INSPECTION_POLICY": {
+      "allowed_sources": [],
+      "unsupported_sources": [
+        "quota_prechecks",
+        "HC_QUOTA_EXPORT_JSON",
+        "terraform_provider_schema_quota_preflight",
+        "undocumented_direct_api_calls"
+      ],
+      "not_available_policy": "Quota precheck is disabled. The runner must log quota_precheck=disabled and quota_assumption=assume_sufficient, then proceed directly to Terraform plan/apply.",
+      "HC_INSTANCE_DISK_SIZE_GB_default": 40,
+      "HC_QUOTA_EXPORT_JSON": "Ignored for automatic instance creation. Do not read quota exports for preflight decisions.",
+      "reduced_disk_test_policy": "HC_INSTANCE_DISK_SIZE_GB may override the root disk size for diagnostic reduced-disk tests. The official health-check disk size remains 40 GB. Any non-40 value must be reported as reduced_disk_test=True and not as an official 40GB pass."
+    },
+    "INSTANCE_BATCHING_POLICY": {
+      "HC_INSTANCES_PER_APPLY": 1,
+      "HC_STOP_ON_QUOTA_EXCEEDED": true,
+      "HC_INSTANCE_DISK_SIZE_GB": 40,
+      "selection_order": [
+        "windows-2012",
+        "windows-2016",
+        "windows-2019",
+        "windows-2022",
+        "ubuntu-20-04",
+        "ubuntu-22-04"
+      ],
+      "execution_behavior": "Create exactly one VM per Terraform apply by default. Attempt resolved images sequentially in selection_order. After each successful VM creation, update run-log.html, persist the created instance ID in the run workspace, and continue to the next image. Do not request a multi-instance batch.",
+      "failure_behavior": {
+        "quota_exceeded": "If any VM creation fails with instance_storage_quota_exceeded or instance_quota_exceeded, immediately stop execution of the entire workflow, do not attempt remaining images, retain failed/created instances by default, do not delete/reclaim/recover/recreate/retry automatically, set run_blocked=true, and report run_status=blocked_waiting_user_confirmation plus user_action_required=True.",
+        "instance_provider_error": "If any VM creation fails with instance_provider_error (non-quota), enqueue the failed case into the in-memory instance error queue (instance_error_queue) and continue to the next image in the first pass. Do not stop the image loop. After the first pass completes, retry each queued case up to INSTANCE_ERROR_QUEUE_RETRY_POLICY.max_attempts_per_case total attempts (original attempt counts as attempt 1). Retain failed instances per INSTANCE_CLEANUP_POLICY.retain_by_default. Do not set run_blocked. Do not set run_status=blocked_waiting_user_confirmation. Do not set user_action_required=True. See INSTANCE_ERROR_QUEUE_RETRY_POLICY for full retry event and behavior specification."
+      },
+      "reporting": [
+        "quota_precheck",
+        "quota_assumption",
+        "quota_exceeded_action",
+        "instances_per_apply",
+        "stop_on_quota_exceeded",
+        "run_status",
+        "user_action_required",
+        "selected_images",
+        "successful_images",
+        "failed_image",
+        "failure_reason",
+        "remaining_images_not_attempted",
+        "unavailable_images",
+        "apply_requested_instance_count",
+        "apply_requested_storage_gb",
+        "apply_requested_cpu",
+        "apply_requested_ram_mb",
+        "per_instance_create_result",
+        "retained_instance_ids",
+        "deleted_instance_ids"
+      ]
+    },
+    "INSTANCE_HOSTNAME_POLICY": {
+      "windows": {
+        "max_length": 15,
+        "pattern": "^[A-Za-z][A-Za-z0-9-]{0,13}[A-Za-z0-9]$",
+        "allowed_characters": "letters, numbers, hyphen",
+        "must_start_with": "letter",
+        "must_end_with": "letter_or_number",
+        "generator_prefix": "hcw",
+        "generator_format": "hcw<random>",
+        "example": "hcw7k92m1"
+      },
+      "linux": {
+        "max_length": 63,
+        "pattern": "^[A-Za-z][A-Za-z0-9-]{0,61}[A-Za-z0-9]$",
+        "allowed_characters": "letters, numbers, hyphen",
+        "must_start_with": "letter",
+        "must_end_with": "letter_or_number",
+        "generator_prefix": "hcl-",
+        "generator_format": "hcl-<random>"
+      }
+    },
+    "ROLLING_INSTANCE_STRATEGY": {
+      "governing_spec": "specs/06-QUOTA-AWARE-ROLLING-STRATEGY.md",
+      "INSTANCE_DISK_GB": 40,
+      "INSTANCE_VCPU": 2,
+      "INSTANCE_RAM_MB": 2048,
+      "MAX_INSTANCE_CREATE_RETRY": 1,
+      "MAX_QUOTA_RECOVERY_ATTEMPTS": 1,
+      "INSTANCE_ACTIVE_TIMEOUT_S": 600,
+      "INSTANCE_ACTIVE_POLL_S": 15,
+      "TARGET_VPCS": [
+        "FCI-L1-HAN-VPC",
+        "FCI-L1-OPS-HAN"
+      ],
+      "TARGET_VPCS_SOURCE": "VPC_IDS (resolved per-VPC by compute.discover-vpc)",
+      "SUPPORTED_IMAGES": [
+        "windows-2012",
+        "windows-2016",
+        "windows-2019",
+        "windows-2022",
+        "ubuntu-20-04",
+        "ubuntu-22-04"
+      ],
+      "UNAVAILABLE_IMAGES": [
+        "ubuntu-16-04",
+        "ubuntu-18-04"
+      ],
+      "env_overrides": {
+        "INSTANCE_DISK_GB": "HC_INSTANCE_DISK_SIZE_GB",
+        "INSTANCE_VCPU": "HC_INSTANCE_VCPU",
+        "INSTANCE_RAM_MB": "HC_INSTANCE_RAM_MB",
+        "MAX_INSTANCE_CREATE_RETRY": "HC_MAX_INSTANCE_CREATE_RETRY",
+        "MAX_QUOTA_RECOVERY_ATTEMPTS": "HC_MAX_QUOTA_RECOVERY_ATTEMPTS",
+        "INSTANCE_ACTIVE_TIMEOUT_S": "HC_INSTANCE_ACTIVE_TIMEOUT_S",
+        "INSTANCE_ACTIVE_POLL_S": "HC_INSTANCE_ACTIVE_POLL_S",
+        "TARGET_VPCS": "VPC_IDS"
+      },
+      "MULTI_VPC_EXECUTION_POLICY": {
+        "order": "round_robin",
+        "instances_per_vpc_per_round": 1,
+        "keep_created_instances": true
+      },
+      "QUOTA_RECOVERY_POLICY": {
+        "model": "optimistic_apply_only",
+        "quota_precheck": "disabled",
+        "quota_assumption": "assume_sufficient",
+        "quota_exceeded_action": "stop_and_wait_for_user",
+        "automatic_recovery_enabled": false,
+        "numeric_quota": "not_available",
+        "quota_source_on_recovery": "manual_user_confirmed_action_only",
+        "trigger_classifications": [
+          "instance_storage_quota_exceeded",
+          "instance_quota_exceeded"
+        ],
+        "trigger_phrases": [
+          "instance storage exceeds vpc quota",
+          "quota exceeded",
+          "resource limit exceeded"
+        ],
+        "selection_priority": [
+          "oldest_successful_health_check_vm",
+          "oldest_stopped_health_check_vm",
+          "oldest_running_health_check_vm"
+        ],
+        "max_deletions_per_quota_event": 0,
+        "delete_via": "manual_user_confirmed_recovery_only",
+        "direct_delete_exception": "No automatic direct delete is allowed. Any recovery or cleanup action requires explicit user confirmation."
+      },
+      "INSTANCE_TAGGING_POLICY": {
+        "required_tags": {
+          "managed_by": "health-check",
+          "health_check": "true"
+        },
+        "provenance_tags": [
+          "hc_run_id",
+          "hc_created_at"
+        ],
+        "applied_at": "create",
+        "fail_closed": "reclamation selects nothing unless tag AND name pattern match"
+      },
+      "INSTANCE_NAMING_POLICY": {
+        "instance_name": "hcvm-<os>-<random>",
+        "windows_hostname": "hcw<6 random>",
+        "windows_hostname_max_len": 15,
+        "linux_hostname": "hcl-<8 random>",
+        "random_charset": "[a-z0-9]",
+        "supersedes": "prior hc-vm-<os>-<suffix> resource name pattern for rolling stages"
+      }
+    }
+  },
+  "LOG_FORMAT_POLICY": {
+    "primary_format": "json",
+    "primary_path": "runs/<run_id>/log.json",
+    "primary_written_continuously": true,
+    "root_alias_path": "log.json",
+    "root_alias_written_continuously": true,
+    "root_alias_overwritten_at_run_start": true,
+    "html_output": "derived_optional",
+    "html_path": "log.html",
+    "html_written_continuously": true,
+    "html_is_derived_from_primary_json": true,
+    "single_html_root_file": true,
+    "no_duplicate_html_per_run": true,
+    "run_log_html_deprecated": true,
+    "run_log_html_no_longer_generated": true,
+    "ai_handoff_format": "json_filtered",
+    "ai_handoff_default_mode": "summary"
+  },
+  "LOG_EVENT_SCHEMA": {
+    "description": "Structured fields present on every event object in log.json.",
+    "required_fields": [
+      "timestamp",
+      "run_id",
+      "stage",
+      "status",
+      "message",
+      "details",
+      "classification",
+      "resource",
+      "os_label",
+      "attempt"
+    ],
+    "field_descriptions": {
+      "timestamp": "ISO-8601 timestamp of the event",
+      "run_id": "Run identifier, e.g. hc-20260615-162722",
+      "stage": "Stage or event name from spec stages or report_events",
+      "status": "Event status: started, done, passed, failed, skipped, queued, blocked, pending, ready, locked, unlocked, destroyed, retry",
+      "message": "Short human-readable summary: text before the first semicolon, max 200 characters",
+      "details": "Full event message including all key=value diagnostics pairs and Resources list",
+      "classification": "Failure classification extracted from Classification: prefix or classification= key in details, or empty string",
+      "resource": "Primary resource: first entry in the resources list, or empty string",
+      "os_label": "OS image label extracted from os_label= or image_label= in details, or empty string",
+      "attempt": "Attempt number extracted from attempt= in details, or 0"
+    }
+  },
+  "FILTERED_OUTPUT_MODES": {
+    "description": "Modes available via: py -3.11 scripts/run_health_checks.py --view runs/<run_id>/log.json --filter <mode>",
+    "modes": {
+      "summary": "One row per top-level stage (stages without colon), showing the last-emitted status for each stage",
+      "failed": "Only events with status failed or blocked",
+      "blocked": "Only events with status blocked",
+      "queued": "Only events with status queued",
+      "retained_resources": "Events whose details contain retained_instance_ids",
+      "created_resources": "Events with status passed or ready that contain instance_id= in details"
+    },
+    "output_format": "Fixed-width plain text table: timestamp, stage, status, os_label, attempt, message",
+    "default_mode": "summary"
   },
   "statuses": [
     "automated",
     "partially_automated",
     "manual_only",
+    "not_implemented",
     "blocked",
     "unsupported"
   ],
@@ -23,8 +429,264 @@
     "object_storage_region_disabled",
     "subnet_cidr_overlap",
     "subnet_cidr_overlap_preflight",
-    "subnet_cidr_exhausted"
+    "subnet_cidr_exhausted",
+    "instance_missing_required_inputs",
+    "instance_image_unresolved",
+    "instance_flavor_unresolved",
+    "instance_password_missing",
+    "instance_network_attachment_missing",
+    "instance_create_failed",
+    "instance_provider_error",
+    "instance_quota_exceeded",
+    "instance_storage_quota_exceeded",
+    "instance_storage_quota_exceeded_preflight",
+    "image_unavailable_in_region",
+    "instance_cleanup_failed",
+    "instance_cleanup_not_allowed",
+    "instance_retained_by_policy",
+    "retained_failed_instance",
+    "instance_password_policy_invalid",
+    "instance_hostname_invalid",
+    "vpc_selection_failed",
+    "instance_validation_failed",
+    "instance_boot_unverified",
+    "instance_not_active",
+    "health_check_instance_not_found",
+    "health_check_instance_delete_failed",
+    "quota_recovery_exhausted",
+    "instance_quota_recovered",
+    "instance_recreate_failed",
+    "round_incomplete"
   ],
+  "report_events": [
+    "run",
+    "diagnostics",
+    "spec",
+    "network.select-additional-subnet-cidr",
+    "<stage>:lock",
+    "<stage>:destroy",
+    "<stage>:context",
+    "<stage>:inputs",
+    "<stage>:cleanup",
+    "compute.create-instance:inputs",
+    "compute.create-instance:cleanup",
+    "compute.cleanup-instance",
+    "compute.discover-instance-images",
+    "compute.discover-instance-flavor",
+    "compute.validate-instance-storage-policy",
+    "compute.validate-instance-network-inputs",
+    "compute.validate-instance-hostname",
+    "compute.select-instance-round",
+    "compute.resolve-instance-image",
+    "compute.resolve-instance-flavor",
+    "network.additional-subnet:attempt",
+    "network.additional-subnet:overlap-detected",
+    "quota.before",
+    "instance.created",
+    "instance.create_failed_queued",
+    "instance.retry_started",
+    "instance.retry_succeeded",
+    "instance.retry_failed",
+    "instance.retry_exhausted",
+    "compute.create-instance:retry-summary",
+    "quota.exceeded",
+    "instance.deleted",
+    "quota.recovered",
+    "instance.recreated",
+    "image.skipped",
+    "round.completed"
+  ],
+  "report_events_future": [
+    "vpc.selected",
+    "instance.validated"
+  ],
+  "generated_artifacts": [
+    {
+      "path": "runs/<run_id>/log.json",
+      "purpose": "Primary structured JSON event log for this run. Source of truth for all event data.",
+      "generation_trigger": "scripts/run_health_checks.py run — written continuously on every event.",
+      "overwrite_behavior": "Written fresh for each unique run_id; never overwrites a prior run's log.",
+      "retention_policy": "Retained permanently inside the run directory.",
+      "format": "JSON array of event objects conforming to LOG_EVENT_SCHEMA"
+    },
+    {
+      "path": "log.json",
+      "purpose": "Root-level alias for the current run's JSON log. Overwritten at the start of each new run.",
+      "generation_trigger": "scripts/run_health_checks.py run — written continuously on every event.",
+      "overwrite_behavior": "Overwrite at the start of each run.",
+      "retention_policy": "Latest run only. Persistent copy lives in runs/<run_id>/log.json.",
+      "format": "Same as runs/<run_id>/log.json"
+    },
+    {
+      "path": "log.html",
+      "purpose": "Derived HTML view of the current run's events. Rendered from log.json for human reading in a browser. Not the source of truth.",
+      "generation_trigger": "scripts/run_health_checks.py run — derived continuously from JSON events.",
+      "overwrite_behavior": "Overwrite at the start of each run.",
+      "retention_policy": "Latest root copy only."
+    },
+    {
+      "path": "run-log.html",
+      "purpose": "DEPRECATED. No longer generated. Was a duplicate of log.html. Use runs/<run_id>/log.json instead.",
+      "generation_trigger": "Not generated.",
+      "overwrite_behavior": "N/A",
+      "retention_policy": "May be deleted."
+    },
+    {
+      "path": "implementation-notes.md",
+      "purpose": "Running implementation log for decisions, assumptions, tradeoffs, provider gaps, safety decisions, cleanup behavior, and remaining risks.",
+      "generation_trigger": "Implementation milestone that explicitly requires implementation notes.",
+      "overwrite_behavior": "Append or update in place for the active milestone.",
+      "retention_policy": "Retain until superseded or archived."
+    },
+    {
+      "path": "spec-coverage-report.md",
+      "purpose": "Audit of repository behavior, outputs, validations, and assumptions against specs.",
+      "generation_trigger": "Spec-governance audit.",
+      "overwrite_behavior": "Overwrite with the latest audit.",
+      "retention_policy": "Latest root copy only."
+    },
+    {
+      "path": "spec-compliance-report.md",
+      "purpose": "Compliance matrix for implemented features against governing specs and tests.",
+      "generation_trigger": "Spec-governance audit or CI compliance check.",
+      "overwrite_behavior": "Overwrite with the latest audit.",
+      "retention_policy": "Latest root copy only."
+    },
+    {
+      "path": "runs/<run_id>/",
+      "purpose": "Per-run workspace, logs, queue snapshots, and evidence bundles.",
+      "generation_trigger": "Health-check run or evidence collection stage.",
+      "overwrite_behavior": "Never overwrite unique run IDs.",
+      "retention_policy": "Retain until manually archived or deleted."
+    },
+    {
+      "path": "runs/<run_id>/report.md",
+      "purpose": "Markdown health-check verdict report.",
+      "generation_trigger": "Report rendering workflow.",
+      "overwrite_behavior": "Overwrite only inside the same run ID.",
+      "retention_policy": "Retain with the run directory."
+    },
+    {
+      "path": "runs/<run_id>/report.html",
+      "purpose": "HTML health-check verdict report.",
+      "generation_trigger": "Report rendering workflow.",
+      "overwrite_behavior": "Overwrite only inside the same run ID.",
+      "retention_policy": "Retain with the run directory."
+    },
+    {
+      "path": "runs/<run_id>/report.json",
+      "purpose": "Machine-readable health-check verdict report.",
+      "generation_trigger": "Report rendering workflow.",
+      "overwrite_behavior": "Overwrite only inside the same run ID.",
+      "retention_policy": "Retain with the run directory."
+    },
+    {
+      "path": "runs/<run_id>/*-evidence.zip",
+      "purpose": "Sanitized provider support evidence bundle.",
+      "generation_trigger": "Evidence collection stage.",
+      "overwrite_behavior": "One bundle per stage/run.",
+      "retention_policy": "Retain with the run directory."
+    },
+    {
+      "path": "runs/diagnostics/latest.json",
+      "purpose": "Latest sanitized diagnostic snapshot.",
+      "generation_trigger": "scripts/diagnose_health_inputs.py run.",
+      "overwrite_behavior": "Overwrite on each diagnostics run.",
+      "retention_policy": "Latest plus timestamped diagnostics files."
+    },
+    {
+      "path": "runs/diagnostics/diagnostics-*.json",
+      "purpose": "Timestamped sanitized diagnostic snapshots.",
+      "generation_trigger": "scripts/diagnose_health_inputs.py run.",
+      "overwrite_behavior": "Never overwrite unique timestamps.",
+      "retention_policy": "Retain until manually archived or deleted."
+    },
+    {
+      "path": "coverage.json",
+      "purpose": "Machine-readable Python coverage report.",
+      "generation_trigger": "Coverage workflow.",
+      "overwrite_behavior": "Overwrite by coverage workflow.",
+      "retention_policy": "Latest only."
+    },
+    {
+      "path": "htmlcov/",
+      "purpose": "HTML Python coverage report.",
+      "generation_trigger": "Coverage workflow.",
+      "overwrite_behavior": "Overwrite by coverage workflow.",
+      "retention_policy": "Latest only or CI artifact."
+    },
+    {
+      "path": "runs/fptcloud-connect-check/",
+      "purpose": "Terraform connectivity-check workspace and instructions.",
+      "generation_trigger": "FPT Cloud connectivity check workflow.",
+      "overwrite_behavior": "Update by connectivity check workflow.",
+      "retention_policy": "Retain until manually deleted."
+    },
+    {
+      "path": "runs/fptcloud-api-url-explanation.html",
+      "purpose": "Local explanatory reference for FPT Cloud API URL checks.",
+      "generation_trigger": "Connectivity troubleshooting workflow.",
+      "overwrite_behavior": "Overwrite when regenerated.",
+      "retention_policy": "Latest only."
+    }
+  ],
+  "environment_loading": {
+    "dotenv_path": ".env",
+    "load_before_diagnostics": true,
+    "load_before_stage_selection": true,
+    "override_existing_environment": false,
+    "required_presence_diagnostics": [
+      "FPTCLOUD_TOKEN",
+      "FPTCLOUD_REGION",
+      "FPTCLOUD_TENANT_NAME"
+    ],
+    "secret_presence_only": [
+      "FPTCLOUD_TOKEN",
+      "HC_SSH_KEY",
+      "generated_instance_password"
+    ],
+    "report_event": "environment",
+    "validation_method": "Before diagnostics or stage selection, load .env from the repository root when it exists. Do not overwrite variables already present in the process environment. Emit an environment event that reports current working directory, expected .env path, whether .env exists, whether it was loaded, loaded variable count, skipped existing variable count, and required variables as present or missing. For FPTCLOUD_TOKEN, HC_SSH_KEY, generated_instance_password, and any key containing TOKEN, PASSWORD, SECRET, PRIVATE, or KEY_MATERIAL, report presence only and never print values."
+  },
+  "generated_instance_password_policy": {
+    "purpose": "Generate the password used for password-based fptcloud_instance creation without requiring operator-provided HC_INSTANCE_PASSWORD.",
+    "generation_trigger": "At health-check runner startup before instance validation.",
+    "scope": "One password per run, reused for all Compute Instances created in that run unless a future spec defines per-VM passwords.",
+    "length": 24,
+    "min_length": 12,
+    "spaces_allowed": false,
+    "require_uppercase": true,
+    "require_lowercase": true,
+    "require_number": true,
+    "allowed_special_characters": "?@*%$&!#",
+    "require_special_character": true,
+    "disallow_other_special_characters": true,
+    "allowed_character_classes": [
+      "uppercase A-Z",
+      "lowercase a-z",
+      "digits 0-9",
+      "special characters ?@*%$&!#"
+    ],
+    "special_characters_allowed": true,
+    "minimum_character_class_coverage": "At least one uppercase letter, one lowercase letter, one digit, and one special character from ?@*%$&!#. Spaces and other special characters are not allowed.",
+    "generator_policy": "Generate one random password per real run and reuse it for all Compute Instances in that run. Tests may make generation deterministic by patching the randomness source. The generated value must always satisfy min_length, no-spaces, uppercase, lowercase, number, allowed-special, and no-disallowed-specials requirements before compute.create-instance may run.",
+    "provider_field": "fptcloud_instance.password",
+    "reporting": "Report password_generated=True/False and password_redacted=True only. Never print or persist the plaintext password in logs, diagnostics, run-log.html, implementation-notes.md, or spec-compliance-report.md.",
+    "storage_policy": "Plaintext generated passwords must live only in runtime process memory. Do not commit or intentionally persist plaintext passwords. Terraform variable files written by the runner must not contain plaintext passwords; pass the value to Terraform through process environment for the apply invocation only.",
+    "failure_classification": "instance_password_policy_invalid",
+    "safety_controls": [
+      "Do not create instances if password generation fails",
+      "Do not print generated password",
+      "Do not persist plaintext password"
+    ]
+  },
+  "instance_group_policy": {
+    "provider_resource": "fptcloud_instance_group",
+    "relevance": "not_required_for_this_milestone",
+    "finding": "Provider instance groups require vpc_id, name, policy_id, and optional vm_ids. They are relevant to grouping or placement policy after VM IDs exist, but are not required for password-based fptcloud_instance creation and are not required for subnet/network attachment.",
+    "usage_policy": "Do not create or attach instance groups in this milestone unless a future spec explicitly requires placement or affinity validation.",
+    "reporting": "Report instance_group_relevance=not_required_for_password_or_network_attachment in compute.create-instance diagnostics."
+  },
   "stages": [
     {
       "id": "general.portal-login",
@@ -69,8 +731,14 @@
       "id": "compute.discover-vpc",
       "manual_check_item": "Resolve VPC ID from configured VPC name or provider lookup key",
       "automation_status": "automated",
-      "required_inputs": ["FPTCLOUD_TOKEN", "FPTCLOUD_REGION", "FPTCLOUD_TENANT_NAME"],
-      "required_cloud_resources": ["Existing VPC"],
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC"
+      ],
       "expected_result": "A real VPC ID is available from explicit HC_VPC_ID or from data.fptcloud_vpc.this.id.",
       "validation_method": "Prefer explicit HC_VPC_ID as the effective VPC ID; otherwise query the official data.fptcloud_vpc data source by name using HC_VPC_NAME, VPC_NAME, VPC_ID, or VPC_IDS[0] as the configured lookup key.",
       "cleanup_behavior": "No resources are created.",
@@ -82,12 +750,20 @@
       "id": "compute.discover-storage-policy",
       "manual_check_item": "Resolve storage policy required for VM/disk checks",
       "automation_status": "automated",
-      "required_inputs": ["FPTCLOUD_TOKEN", "FPTCLOUD_REGION", "FPTCLOUD_TENANT_NAME"],
-      "required_cloud_resources": ["Existing VPC"],
-      "expected_result": "A usable storage policy ID is available from HC_STORAGE_POLICY_ID or provider discovery.",
-      "validation_method": "Prefer explicit HC_STORAGE_POLICY_ID; otherwise query data.fptcloud_storage_policy.this.",
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC"
+      ],
+      "expected_result": "The provider storage-policy inventory is available for exact-name selection. The VM creation path must prefer the exact policy name Premium-SSD and must not choose Premium-SSD-4000 by partial match.",
+      "validation_method": "Query data.fptcloud_storage_policy.this and collect storage_policies with name, id, and id_db. HC_STORAGE_POLICY_ID remains a non-instance discovery input only and does not override the VM storage policy selected by compute.validate-instance-storage-policy.",
       "cleanup_behavior": "No resources are created.",
-      "dependency_stages": ["compute.discover-vpc"],
+      "dependency_stages": [
+        "compute.discover-vpc"
+      ],
       "failure_classification": "provider_endpoint_or_datasource_mismatch",
       "safe_for_daily_run": true
     },
@@ -95,12 +771,20 @@
       "id": "compute.discover-subnet",
       "manual_check_item": "Resolve existing subnet required for VM/security group checks",
       "automation_status": "automated",
-      "required_inputs": ["FPTCLOUD_TOKEN", "FPTCLOUD_REGION", "FPTCLOUD_TENANT_NAME"],
-      "required_cloud_resources": ["Existing VPC"],
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC"
+      ],
       "expected_result": "A usable subnet ID is available from HC_SUBNET_ID or provider discovery.",
       "validation_method": "Prefer explicit HC_SUBNET_ID; otherwise query data.fptcloud_subnet.this.",
       "cleanup_behavior": "No resources are created.",
-      "dependency_stages": ["compute.discover-vpc"],
+      "dependency_stages": [
+        "compute.discover-vpc"
+      ],
       "failure_classification": "provider_or_backend_system_error",
       "safe_for_daily_run": true
     },
@@ -108,12 +792,19 @@
       "id": "compute.validate-subnet-inputs",
       "manual_check_item": "Validate subnet creation inputs before provider apply",
       "automation_status": "automated",
-      "required_inputs": ["FPTCLOUD_REGION", "FPTCLOUD_TENANT_NAME", "HC_SUBNET_CIDR", "HC_SUBNET_GATEWAY"],
+      "required_inputs": [
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME",
+        "HC_SUBNET_CIDR",
+        "HC_SUBNET_GATEWAY"
+      ],
       "required_cloud_resources": [],
       "expected_result": "Subnet name, CIDR, gateway, VPC identifier shape, region, tenant, and Terraform module variables are locally valid or clearly reported as not API-verifiable.",
       "validation_method": "Local dry-run validation only; no Terraform apply and no FPT Cloud resources are created.",
       "cleanup_behavior": "No resources are created.",
-      "dependency_stages": ["compute.discover-vpc"],
+      "dependency_stages": [
+        "compute.discover-vpc"
+      ],
       "failure_classification": "configuration_invalid",
       "safe_for_daily_run": true
     },
@@ -121,12 +812,23 @@
       "id": "compute.create-subnet",
       "manual_check_item": "Create subnet for VM",
       "automation_status": "automated",
-      "required_inputs": ["FPTCLOUD_TOKEN", "FPTCLOUD_REGION", "FPTCLOUD_TENANT_NAME", "HC_SUBNET_CIDR", "HC_SUBNET_GATEWAY"],
-      "required_cloud_resources": ["VPC"],
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME",
+        "HC_SUBNET_CIDR",
+        "HC_SUBNET_GATEWAY"
+      ],
+      "required_cloud_resources": [
+        "VPC"
+      ],
       "expected_result": "A temporary VM subnet is created and reaches a ready state.",
       "validation_method": "Run compute.validate-subnet-inputs first, then Terraform plan/apply using modules/subnet, then state/readiness inspection.",
       "cleanup_behavior": "Always run terraform destroy for the stage workspace; destroy must be idempotent.",
-      "dependency_stages": ["compute.discover-vpc", "compute.validate-subnet-inputs"],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.validate-subnet-inputs"
+      ],
       "failure_classification": "provider_or_backend_system_error_after_valid_inputs",
       "safe_for_daily_run": true
     },
@@ -134,25 +836,803 @@
       "id": "compute.collect-subnet-create-evidence",
       "manual_check_item": "Collect subnet create evidence package for provider/API support",
       "automation_status": "automated",
-      "required_inputs": ["FPTCLOUD_REGION", "FPTCLOUD_TENANT_NAME", "HC_SUBNET_CIDR", "HC_SUBNET_GATEWAY"],
+      "required_inputs": [
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME",
+        "HC_SUBNET_CIDR",
+        "HC_SUBNET_GATEWAY"
+      ],
       "required_cloud_resources": [],
       "expected_result": "A sanitized evidence bundle is produced with effective config, provider lockfile info, module path, Terraform variables, validation warnings, plan output, Terraform logs, stage report, and latest create-subnet error classification.",
       "validation_method": "Run local subnet validation, then Terraform init/plan/show only. Do not run Terraform apply by default.",
       "cleanup_behavior": "No resources are created.",
-      "dependency_stages": ["compute.discover-vpc", "compute.validate-subnet-inputs"],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.validate-subnet-inputs"
+      ],
       "failure_classification": "provider_support_evidence_collected",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.discover-instance-images",
+      "manual_check_item": "Discover Compute Instance OS image matrix",
+      "purpose": "Discover provider-supported image names for Windows Server 2012, Windows Server 2016, Windows Server 2019, Windows Server 2022, Ubuntu 16.04, Ubuntu 18.04, Ubuntu 20.04, and Ubuntu 22.04 without requiring daily operator image variables.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME",
+        "effective_vpc_id"
+      ],
+      "optional_inputs": [
+        "HC_IMAGE_WINDOWS_2012",
+        "HC_IMAGE_WINDOWS_2016",
+        "HC_IMAGE_WINDOWS_2019",
+        "HC_IMAGE_WINDOWS_2022",
+        "HC_IMAGE_UBUNTU_16_04",
+        "HC_IMAGE_UBUNTU_18_04",
+        "HC_IMAGE_UBUNTU_20_04",
+        "HC_IMAGE_UBUNTU_22_04",
+        "HC_REQUIRE_ALL_INSTANCE_IMAGES"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Provider image catalog"
+      ],
+      "expected_result": "Provider image names are resolved for the OS matrix. Partial resolution is reported as partial with resolved_count and unresolved_count. Explicit HC_IMAGE_* values may override discovery for debugging, but daily health checks must not require them.",
+      "terraform_data_source_mapping": {
+        "data_source": "fptcloud_image",
+        "required_fields": {
+          "vpc_id": "effective_vpc_id"
+        },
+        "filters": {
+          "name": "Supports exact, regex, and substring matching",
+          "catalog": "Supports exact, regex, and substring matching",
+          "id": "Supported for explicit image lookup",
+          "is_gpu": "Supported; must be false or omitted for this matrix"
+        },
+        "read_only_outputs": [
+          "images[].id",
+          "images[].name",
+          "images[].catalog",
+          "images[].is_gpu"
+        ]
+      },
+      "discovery_policy": "Use data.fptcloud_image with effective_vpc_id. For each OS label, prefer explicit HC_IMAGE_* override when configured, otherwise discover by provider image catalog/name filters. Matching must be deterministic: choose a non-GPU image whose name/catalog matches the OS family and version, prefer newest/provider-sorted candidate when multiple candidates match, and report all candidates considered. Ubuntu 16.04 and Ubuntu 18.04 matching must support common provider name variants including Ubuntu-16-04, ubuntu-16.04, Ubuntu 16.04, Ubuntu Server 16.04, Ubuntu-18-04, ubuntu-18.04, Ubuntu 18.04, and Ubuntu Server 18.04. If some images resolve and some do not, emit partial status with classification instance_image_unresolved, resolved_count, unresolved_count, Ubuntu candidate image names returned by the provider, and matching patterns tried. If Ubuntu 16.04 or Ubuntu 18.04 are unavailable in the tenant/region, mark those labels as image_unavailable_in_region. HC_REQUIRE_ALL_INSTANCE_IMAGES defaults to false so unavailable labels are recorded and skipped instead of blocking the resolved image rounds; when HC_REQUIRE_ALL_INSTANCE_IMAGES=true, unresolved unavailable labels block creation.",
+      "validation_method": "Query data.fptcloud_image with effective_vpc_id and catalog/name filters only. Do not create resources. Discovery must not create instances. Validate and report resolved, partial, or unresolved image matrix status. If require_all_images=true and any target image is unresolved, compute.validate-instance-inputs must remain blocked. If require_all_images=false, resolved images may proceed while unavailable labels are excluded and reported.",
+      "report_events": [
+        "compute.discover-instance-images"
+      ],
+      "failure_classifications": [
+        "instance_image_unresolved",
+        "image_unavailable_in_region",
+        "instance_provider_error"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "safety_controls": [
+        "Do not call Terraform apply for instance creation from this stage",
+        "Do not print secrets",
+        "Do not require operator-supplied image variables for daily runs"
+      ],
+      "dependency_stages": [
+        "compute.discover-vpc"
+      ],
+      "failure_classification": "instance_image_unresolved",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.discover-instance-flavor",
+      "manual_check_item": "Discover 2vCPU/2GB Compute Instance flavor",
+      "purpose": "Discover a provider-supported VM flavor with 2 vCPU and 2 GB RAM without requiring daily operator flavor variables.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME",
+        "effective_vpc_id"
+      ],
+      "optional_inputs": [
+        "HC_FLAVOR_NAME",
+        "HC_FLAVOR_ID"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Provider flavor catalog"
+      ],
+      "expected_result": "A provider flavor name is resolved for a 2 vCPU / 2 GB RAM VM. Explicit HC_FLAVOR_ID or HC_FLAVOR_NAME may override discovery for debugging, but daily health checks must not require them.",
+      "terraform_data_source_mapping": {
+        "data_source": "fptcloud_flavor",
+        "required_fields": {
+          "vpc_id": "effective_vpc_id"
+        },
+        "filters": {
+          "id": "Supported for explicit flavor lookup",
+          "name": "Supported for explicit name lookup",
+          "cpu": "Use value 2 for target daily health-check flavor",
+          "memory_mb": "Use value 2048 for 2 GB RAM",
+          "type": "Use VM_SIZE when available",
+          "gpu_memory_gb": "Must be 0 or omitted for this matrix"
+        },
+        "read_only_outputs": [
+          "flavors[].id",
+          "flavors[].name",
+          "flavors[].cpu",
+          "flavors[].memory_mb",
+          "flavors[].type",
+          "flavors[].gpu_memory_gb"
+        ]
+      },
+      "discovery_policy": "Use data.fptcloud_flavor with effective_vpc_id. Prefer explicit HC_FLAVOR_ID, then explicit HC_FLAVOR_NAME, otherwise discover by cpu=2, memory_mb=2048, type=VM_SIZE, and non-GPU criteria. Matching must be deterministic and report all candidates considered. If no target flavor is resolved, classify instance_flavor_unresolved and do not create instances.",
+      "validation_method": "Query data.fptcloud_flavor with effective_vpc_id and flavor filters only. Do not create resources. Validate that one deterministic 2vCPU/2GB provider flavor name is selected, or report all unresolved/ambiguous candidates and skip instance creation.",
+      "report_events": [
+        "compute.discover-instance-flavor"
+      ],
+      "failure_classifications": [
+        "instance_flavor_unresolved",
+        "instance_provider_error"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "safety_controls": [
+        "Do not call Terraform apply for instance creation from this stage",
+        "Do not print secrets",
+        "Do not require operator-supplied flavor variables for daily runs"
+      ],
+      "dependency_stages": [
+        "compute.discover-vpc"
+      ],
+      "failure_classification": "instance_flavor_unresolved",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.validate-instance-password-policy",
+      "manual_check_item": "Validate generated Compute Instance password policy",
+      "purpose": "Validate that the generated per-run Compute Instance password satisfies the FPT Cloud provider/API password policy before any instance Terraform apply can run.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "generated_instance_password"
+      ],
+      "optional_inputs": [],
+      "required_cloud_resources": [],
+      "expected_result": "The generated password exists, is at least 12 characters, contains no spaces, contains uppercase, lowercase, number, and at least one special character from ?@*%$&!#, and contains no other special characters. The plaintext password is never printed.",
+      "terraform_resource_mapping": {
+        "resource": "fptcloud_instance",
+        "module": "modules/vm",
+        "fields": {
+          "password": "generated_instance_password from generated_instance_password_policy"
+        }
+      },
+      "validation_method": "Local validation only. Report only password_generated=True/False, password_redacted=True, length_ok=True/False, no_spaces=True/False, uppercase_present=True/False, lowercase_present=True/False, number_present=True/False, allowed_special_present=True/False, and no_disallowed_specials=True/False. Never print the password. If validation fails, classify instance_password_policy_invalid, skip compute.create-instance, and do not call Terraform apply.",
+      "identifier_policy": "No external identifiers are resolved by this stage.",
+      "report_events": [
+        "compute.validate-instance-password-policy"
+      ],
+      "failure_classifications": [
+        "instance_password_policy_invalid",
+        "instance_password_missing"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "safety_controls": [
+        "Do not print generated password",
+        "Do not persist plaintext password",
+        "Do not call Terraform apply if password policy validation fails"
+      ],
+      "dependency_stages": [],
+      "failure_classification": "instance_password_policy_invalid",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.validate-instance-storage-policy",
+      "manual_check_item": "Validate Compute Instance storage policy selection",
+      "purpose": "Select the exact Premium-SSD storage policy identifier used by fptcloud_instance root disk creation before instance inputs are validated.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "effective_storage_policy_id"
+      ],
+      "optional_inputs": [
+        "HC_INSTANCE_STORAGE_POLICY_ID",
+        "HC_INSTANCE_STORAGE_POLICY_NAME",
+        "HC_INSTANCE_STORAGE_POLICY_DB_ID",
+        "HC_ROOT_DISK_SIZE"
+      ],
+      "required_cloud_resources": [
+        "Existing storage policy"
+      ],
+      "expected_result": "The exact requested storage policy name Premium-SSD is selected, selected_storage_policy_id is the live provider-facing id (discovered via data.fptcloud_storage_policy.this; currently 9fe95650-d902-4613-ad5a-88c94c71d725), selected_storage_policy_db_id is logged for debugging only, and provider_field_used=storage_policy_id before compute.create-instance may run.",
+      "selection_policy": {
+        "precedence": [
+          "exact HC_INSTANCE_STORAGE_POLICY_NAME when set, otherwise exact INSTANCE_STORAGE_POLICY_SELECTION.preferred_name",
+          "fail fast with storage_policy_preferred_not_found if the exact requested name is absent"
+        ],
+        "provider_field_used": "storage_policy_id",
+        "provider_value_field": "id",
+        "provider_db_id_policy": "id_db is logged only and must not be passed as storage_policy_id for VM creation",
+        "partial_match_policy": "Do not select Premium-SSD-4000 when storage_policy_requested=Premium-SSD.",
+        "fallback_policy": "Automatic storage-policy fallback is disabled. If Premium-SSD or any selected policy fails with instance_storage_quota_exceeded, stop and wait for explicit user confirmation before any recovery, cleanup, or retry."
+      },
+      "validation_method": "Local validation only. Prefer the provider storage-policy inventory collected by compute.discover-storage-policy, otherwise use COLLECTED_INSTANCE_STORAGE_POLICIES as the fallback collected-policy map. Match storage_policy_requested by exact case-sensitive name only. Emit storage_policy_requested, selected_storage_policy_name, selected_storage_policy_id, selected_storage_policy_db_id, storage_policy_source=preferred_exact_name, provider_field_used=storage_policy_id, disk_size_gb, and quota_status if available. If the exact requested policy is not resolved, emit storage_policy_preferred_not_found and skip compute.create-instance.",
+      "identifier_policy": "For VM creation, storage_policy_id must be the live provider-facing id field for Premium-SSD, discovered via data.fptcloud_storage_policy.this. Live-discovered IDs take precedence over COLLECTED_INSTANCE_STORAGE_POLICIES fallback. The id_db value is report/debug metadata only and must not be used as storage_policy_id.",
+      "report_events": [
+        "compute.validate-instance-storage-policy"
+      ],
+      "failure_classifications": [
+        "instance_missing_required_inputs",
+        "storage_policy_preferred_not_found",
+        "instance_storage_quota_exceeded"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "safety_controls": [
+        "Do not print secrets",
+        "Do not call Terraform apply if unresolved",
+        "Do not create bare VM"
+      ],
+      "dependency_stages": [
+        "compute.discover-storage-policy"
+      ],
+      "failure_classification": "instance_missing_required_inputs",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.validate-instance-hostname",
+      "manual_check_item": "Validate Compute Instance guest hostnames",
+      "purpose": "Generate and validate OS-specific guest hostnames separately from logical resource names before any fptcloud_instance Terraform apply can run.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "discovered_instance_images"
+      ],
+      "optional_inputs": [
+        "HC_REQUIRE_ALL_INSTANCE_IMAGES"
+      ],
+      "required_cloud_resources": [],
+      "expected_result": "Every instance matrix entry has a resource_name for runner/report identity and a separate guest_hostname for provider guest computer naming. Windows guest hostnames are at most 15 characters, use only letters, numbers, and hyphen, start with a letter, and end with a letter or number. Linux guest hostnames are at most 63 characters. Invalid hostnames fail validation before Terraform apply.",
+      "hostname_policy": {
+        "resource_name": "Logical runner/report name. It may include OS label and run suffix and must not be reused as the Windows guest computer name.",
+        "guest_hostname": "Provider guest computer hostname. This is the value used where the FPT Cloud provider/API imposes guest computer-name validation.",
+        "windows": {
+          "max_length": 15,
+          "allowed_characters": "letters, numbers, hyphen",
+          "must_start_with": "letter",
+          "must_end_with": "letter_or_number",
+          "generator": "hcw<random>",
+          "example": "hcw7k92m1"
+        },
+        "linux": {
+          "max_length": 63,
+          "allowed_characters": "letters, numbers, hyphen",
+          "must_start_with": "letter",
+          "must_end_with": "letter_or_number",
+          "generator": "hcl-<random>"
+        }
+      },
+      "terraform_resource_mapping": {
+        "resource": "fptcloud_instance",
+        "module": "modules/vm",
+        "fields": {
+          "name": "guest_hostname, not resource_name, because FPT Cloud validates this as the guest computer name"
+        }
+      },
+      "validation_method": "Local validation only. For each matrix entry that is eligible under HC_REQUIRE_ALL_INSTANCE_IMAGES, generate resource_name and guest_hostname separately. Windows hostnames must use hcw<random>, always be <=15 characters, match ^[A-Za-z][A-Za-z0-9-]{0,13}[A-Za-z0-9]$, and be reported with selected_hostname, hostname_length, and hostname_validation_status. Linux hostnames must use hcl-<random>, always be <=63 characters, match ^[A-Za-z][A-Za-z0-9-]{0,61}[A-Za-z0-9]$, and be reported with selected_hostname, hostname_length, and hostname_validation_status. If any hostname is invalid, classify instance_hostname_invalid, skip compute.create-instance, and do not call Terraform apply.",
+      "identifier_policy": "Do not reuse the logical resource_name as the Windows guest_hostname. resource_name exists for reports/workspaces/logical identity. guest_hostname is the provider/API computer name and must satisfy OS-specific hostname limits.",
+      "report_events": [
+        "compute.validate-instance-hostname"
+      ],
+      "failure_classifications": [
+        "instance_hostname_invalid"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "safety_controls": [
+        "Do not call Terraform apply if hostname validation fails",
+        "Do not create bare VM",
+        "Do not print secrets"
+      ],
+      "dependency_stages": [
+        "compute.discover-instance-images"
+      ],
+      "failure_classification": "instance_hostname_invalid",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.validate-instance-inputs",
+      "manual_check_item": "Validate Compute Instance matrix create inputs before provider apply",
+      "purpose": "Validate all local and discovered inputs required for safe temporary fptcloud_instance creation across the Windows and Ubuntu health-check image matrix.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME",
+        "generated_instance_password",
+        "effective_vpc_id",
+        "effective_subnet_id",
+        "effective_storage_policy_id",
+        "discovered_instance_images",
+        "discovered_instance_flavor",
+        "validated_instance_hostnames"
+      ],
+      "optional_inputs": [
+        "HC_INSTANCE_NAME_PREFIX",
+        "HC_ROOT_DISK_SIZE",
+        "HC_INSTANCE_DISK_SIZE_GB",
+        "HC_SECURITY_GROUP_ID",
+        "HC_KEEP_INSTANCE",
+        "HC_SSH_KEY",
+        "HC_IMAGE_WINDOWS_2012",
+        "HC_IMAGE_WINDOWS_2016",
+        "HC_IMAGE_WINDOWS_2019",
+        "HC_IMAGE_WINDOWS_2022",
+        "HC_IMAGE_UBUNTU_16_04",
+        "HC_IMAGE_UBUNTU_18_04",
+        "HC_IMAGE_UBUNTU_20_04",
+        "HC_IMAGE_UBUNTU_22_04",
+        "HC_FLAVOR_NAME",
+        "HC_FLAVOR_ID",
+        "HC_INSTANCE_STORAGE_POLICY_ID",
+        "HC_INSTANCE_STORAGE_POLICY_NAME",
+        "HC_INSTANCE_STORAGE_POLICY_DB_ID"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Existing subnet",
+        "Existing storage policy",
+        "Provider image catalog",
+        "Provider flavor catalog"
+      ],
+      "expected_result": "Inputs and discovered provider catalog values are complete under the current require_all_images policy, a generated password exists, secrets are not printed, resource names and guest hostnames are generated separately, root disk size defaults to 40 GB unless configured, cleanup policy is known, and compute.create-instance may proceed.",
+      "terraform_resource_mapping": {
+        "resource": "fptcloud_instance",
+        "module": "modules/vm",
+        "fields": {
+          "name": "guest_hostname from compute.validate-instance-hostname, not resource_name",
+          "vpc_id": "effective_vpc_id from HC_VPC_ID or compute.discover-vpc",
+          "image_name": "Discovered image name for the current OS label from compute.discover-instance-images; HC_IMAGE_* may override for debugging",
+          "flavor_name": "Discovered 2vCPU/2GB flavor name from compute.discover-instance-flavor; HC_FLAVOR_ID or HC_FLAVOR_NAME may override for debugging",
+          "subnet_id": "effective_subnet_id from HC_SUBNET_ID or compute.discover-subnet",
+          "storage_policy_id": "effective_storage_policy_id from compute.validate-instance-storage-policy",
+          "storage_size_gb": "HC_INSTANCE_DISK_SIZE_GB or HC_ROOT_DISK_SIZE, default 40; non-40 values are reduced_disk_test=True",
+          "status": "POWERED_ON",
+          "password": "generated_instance_password from generated_instance_password_policy",
+          "ssh_key": "HC_SSH_KEY only if configured; password-based login is preferred unless provider behavior requires ssh_key",
+          "security_group_ids": "HC_SECURITY_GROUP_ID when set"
+        }
+      },
+      "validation_method": "Local validation only after discovery, compute.validate-instance-password-policy, compute.validate-instance-storage-policy, and compute.validate-instance-hostname. compute.validate-instance-inputs must run before compute.create-instance. It must validate generated_instance_password exists and password policy validation passed, effective_vpc_id is resolved, effective_subnet_id is resolved, effective_storage_policy_id is resolved by compute.validate-instance-storage-policy, compute.discover-instance-images resolved all required OS image names under the current require_all_images policy, compute.discover-instance-flavor resolved one 2vCPU/2GB flavor name, compute.validate-instance-hostname generated valid resource_name and guest_hostname pairs, HC_INSTANCE_DISK_SIZE_GB or HC_ROOT_DISK_SIZE is a positive integer at least 10 when configured, reduced_disk_test is reported when disk size is not 40 GB, and cleanup policy is known. HC_REQUIRE_ALL_INSTANCE_IMAGES defaults to false. Unavailable image labels may be excluded from creation and reported. If HC_REQUIRE_ALL_INSTANCE_IMAGES=true, unresolved labels block creation. If validation fails, emit compute.validate-instance-inputs with instance_missing_required_inputs, instance_password_missing, instance_password_policy_invalid, instance_image_unresolved, instance_flavor_unresolved, or instance_hostname_invalid, skip compute.create-instance, and do not call Terraform apply for instance creation.",
+      "identifier_policy": "Daily health checks must use discovered image and flavor values. Optional HC_IMAGE_* and HC_FLAVOR_* values are override/debug inputs only. Image resolution uses compute.discover-instance-images. Flavor resolution uses compute.discover-instance-flavor with explicit ID override, explicit name override, then automatic 2vCPU/2GB discovery. Subnet uses explicit ID first, then discovered ID. Instance storage policy selection is delegated to compute.validate-instance-storage-policy.",
+      "report_events": [
+        "compute.validate-instance-inputs"
+      ],
+      "failure_classifications": [
+        "instance_missing_required_inputs",
+        "instance_image_unresolved",
+        "instance_flavor_unresolved",
+        "instance_password_missing",
+        "instance_password_policy_invalid",
+        "instance_hostname_invalid"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "safety_controls": [
+        "Do not print generated_instance_password, HC_SSH_KEY, tokens, or secrets",
+        "Do not call Terraform apply if validation fails"
+      ],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.discover-subnet",
+        "compute.discover-storage-policy",
+        "compute.validate-instance-storage-policy",
+        "compute.discover-instance-images",
+        "compute.discover-instance-flavor",
+        "compute.validate-instance-password-policy",
+        "compute.validate-instance-hostname"
+      ],
+      "failure_classification": "instance_missing_required_inputs",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.validate-instance-network-inputs",
+      "manual_check_item": "Validate Compute Instance network attachment inputs",
+      "purpose": "Ensure every Compute Instance created by compute.create-instance is attached to the discovered VPC/subnet network and is not a bare/unconnected VM.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "effective_vpc_id",
+        "effective_subnet_id",
+        "effective_storage_policy_id"
+      ],
+      "optional_inputs": [
+        "HC_SECURITY_GROUP_ID",
+        "HC_PUBLIC_IP",
+        "HC_PRIVATE_IP"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Existing subnet",
+        "Existing storage policy"
+      ],
+      "expected_result": "The instance Terraform variables include required fptcloud_instance network attachment fields vpc_id and subnet_id, storage_policy_id is resolved, optional security_group_ids/public_ip/private_ip are reported when configured, and connection testing remains manual unless future specs define a safe automated method.",
+      "terraform_resource_mapping": {
+        "resource": "fptcloud_instance",
+        "module": "modules/vm",
+        "fields": {
+          "vpc_id": "Required provider field; effective_vpc_id",
+          "subnet_id": "Required provider field; effective_subnet_id and primary network attachment",
+          "storage_policy_id": "Required provider field; effective_storage_policy_id",
+          "security_group_ids": "Optional provider field; HC_SECURITY_GROUP_ID when configured",
+          "private_ip": "Optional provider field; not configured unless future spec enables it",
+          "public_ip": "Optional provider field; not configured unless future spec enables it",
+          "password": "Optional provider field used by this health check; HC_INSTANCE_PASSWORD, secret",
+          "status": "Required provider field; POWERED_ON"
+        }
+      },
+      "validation_method": "Local validation only. Validate effective_vpc_id, effective_subnet_id, and effective_storage_policy_id are resolved. Validate every prepared instance Terraform variable set includes non-empty vpc_id and subnet_id. When provider subnet metadata is available, validate subnet belongs to effective_vpc_id; otherwise report subnet_vpc_membership=not_verified. Emit generated 12-character suffix, instance names per OS, network attachment fields, security_group_configured, public_ip_configured, and connection_test_policy=manual_verification_required. If validation fails, classify instance_network_attachment_missing, skip compute.create-instance, and do not call Terraform apply.",
+      "identifier_policy": "Use effective_vpc_id and effective_subnet_id from discovery or explicit IDs. Do not accept missing subnet/network attachment for instance creation.",
+      "report_events": [
+        "compute.validate-instance-network-inputs"
+      ],
+      "failure_classifications": [
+        "instance_network_attachment_missing"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "safety_controls": [
+        "Do not create bare VM",
+        "Do not create if network attachment validation fails",
+        "Never delete discovered VPC, subnet, storage policy, or existing security group",
+        "Do not print secrets"
+      ],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.discover-subnet",
+        "compute.discover-storage-policy",
+        "compute.validate-instance-storage-policy",
+        "compute.validate-instance-inputs"
+      ],
+      "failure_classification": "instance_network_attachment_missing",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.inspect-instance-quota",
+      "manual_check_item": "Manual diagnostic only: quota precheck disabled",
+      "purpose": "Record the optimistic quota assumption when invoked directly. This stage must not inspect quota or gate Terraform apply for instance creation.",
+      "automation_status": "manual_only",
+      "required_inputs": [
+        "effective_vpc_id",
+        "effective_storage_policy_id"
+      ],
+      "optional_inputs": [
+        "HC_QUOTA_EXPORT_JSON",
+        "HC_INSTANCE_DISK_SIZE_GB",
+        "HC_ROOT_DISK_SIZE"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Existing storage policy"
+      ],
+      "expected_result": "The runner reports quota_precheck=disabled and quota_assumption=assume_sufficient. No quota source is inspected and no Terraform apply is blocked.",
+      "terraform_resource_mapping": {
+        "provider_schema_evidence": "Use terraform providers schema for fptcloud provider to determine whether quota fields or listable quota consumers are exposed.",
+        "documented_data_sources": [
+          "fptcloud_instance",
+          "fptcloud_storage",
+          "fptcloud_storage_policy",
+          "fptcloud_flavor"
+        ],
+        "portal_export": "HC_QUOTA_EXPORT_JSON is ignored for automatic instance creation."
+      },
+      "validation_method": "Do not perform quota prechecks. Emit quota_precheck=disabled, quota_assumption=assume_sufficient, and quota_exceeded_action=stop_and_wait_for_user.",
+      "identifier_policy": "Use effective_vpc_id and effective_storage_policy_id. Do not infer quota from the provider apply failure text except for classification.",
+      "report_events": [
+        "compute.inspect-instance-quota"
+      ],
+      "failure_classifications": [
+        "instance_storage_quota_exceeded",
+        "instance_storage_quota_exceeded_preflight"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not print secrets",
+        "Do not inspect quota for preflight",
+        "Do not call undocumented direct APIs",
+        "Do not delete resources"
+      ],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.discover-storage-policy",
+        "compute.validate-instance-storage-policy"
+      ],
+      "failure_classification": "instance_storage_quota_exceeded",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.select-instance-round",
+      "manual_check_item": "Select sequential Compute Instance creation order",
+      "purpose": "Create instances sequentially instead of attempting resolved images as a multi-instance batch.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "discovered_instance_images",
+        "discovered_instance_flavor",
+        "validated_instance_hostnames"
+      ],
+      "optional_inputs": [
+        "HC_INSTANCES_PER_APPLY",
+        "HC_STOP_ON_QUOTA_EXCEEDED",
+        "HC_INSTANCE_DISK_SIZE_GB",
+        "HC_ROOT_DISK_SIZE"
+      ],
+      "required_cloud_resources": [
+        "Provider image catalog",
+        "Provider flavor catalog"
+      ],
+      "expected_result": "The runner records the ordered sequential image list, unavailable images, and per-apply quota request. By default, each Terraform apply requests exactly one VM: 1 instance, 40 GB storage, 2 vCPU, and 2048 MB RAM.",
+      "validation_method": "Use INSTANCE_BATCHING_POLICY constants as defaults, with same-named environment variables allowed as runtime overrides. Select resolved images in selection_order: windows-2012, windows-2016, windows-2019, windows-2022, ubuntu-20-04, ubuntu-22-04. Do not select unresolved images; record them as unavailable. HC_INSTANCES_PER_APPLY must default to 1 and daily health checks must not use a multi-instance apply. Compute apply_requested_instance_count=1, apply_requested_storage_gb as one times HC_INSTANCE_DISK_SIZE_GB/HC_ROOT_DISK_SIZE/default, apply_requested_cpu=2, and apply_requested_ram_mb=2048.",
+      "identifier_policy": "Use labels and image names resolved by compute.discover-instance-images. Do not infer or synthesize unavailable images.",
+      "report_events": [
+        "compute.select-instance-round"
+      ],
+      "failure_classifications": [
+        "instance_image_unresolved"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not request more than HC_INSTANCES_PER_APPLY instances per apply",
+        "Stop immediately after instance_storage_quota_exceeded when HC_STOP_ON_QUOTA_EXCEEDED=true",
+        "Do not delete resources"
+      ],
+      "dependency_stages": [
+        "compute.discover-instance-images",
+        "compute.discover-instance-flavor",
+        "compute.validate-instance-hostname",
+        "compute.validate-instance-inputs"
+      ],
+      "failure_classification": "instance_image_unresolved",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.validate-instance-quota",
+      "manual_check_item": "Manual diagnostic only: quota precheck disabled",
+      "purpose": "Do not validate requested quota before Terraform apply. Instance creation assumes quota is sufficient until the provider apply result proves otherwise.",
+      "automation_status": "manual_only",
+      "required_inputs": [
+        "effective_vpc_id",
+        "effective_storage_policy_id"
+      ],
+      "optional_inputs": [
+        "HC_QUOTA_EXPORT_JSON",
+        "HC_INSTANCE_DISK_SIZE_GB",
+        "HC_ROOT_DISK_SIZE"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Existing storage policy"
+      ],
+      "expected_result": "The runner reports preflight_decision=disabled_allow_apply, quota_precheck=disabled, quota_assumption=assume_sufficient, and never skips Terraform apply because of quota preflight data.",
+      "validation_method": "Do not compare requested resources against quota fields. Do not read HC_QUOTA_EXPORT_JSON. Provider apply is the authoritative quota check.",
+      "identifier_policy": "Use target_requested_disk_size_gb only for reporting. Do not use it to block apply.",
+      "report_events": [
+        "compute.validate-instance-quota"
+      ],
+      "failure_classifications": [
+        "instance_storage_quota_exceeded_preflight",
+        "instance_storage_quota_exceeded"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not perform quota prechecks",
+        "Do not block Terraform apply on quota assumptions",
+        "Do not delete resources"
+      ],
+      "dependency_stages": [],
+      "failure_classification": "instance_storage_quota_exceeded_preflight",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.create-instance",
+      "manual_check_item": "Create Compute Instances sequentially",
+      "purpose": "Create temporary password-based Compute Instances one at a time in the order selected by compute.select-instance-round using fptcloud_instance, validate provider state, report instance IDs and statuses when available, record success/failure/not-attempted images, and retain created or failed instances by default for debugging and portal inspection.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "FPTCLOUD_TOKEN",
+        "FPTCLOUD_REGION",
+        "FPTCLOUD_TENANT_NAME",
+        "generated_instance_password",
+        "effective_vpc_id",
+        "effective_subnet_id",
+        "effective_storage_policy_id",
+        "discovered_instance_images",
+        "discovered_instance_flavor",
+        "validated_instance_hostnames",
+        "selected_round_images"
+      ],
+      "optional_inputs": [
+        "HC_INSTANCE_NAME_PREFIX",
+        "HC_ROOT_DISK_SIZE",
+        "HC_INSTANCE_DISK_SIZE_GB",
+        "HC_INSTANCES_PER_APPLY",
+        "HC_STOP_ON_QUOTA_EXCEEDED",
+        "HC_SECURITY_GROUP_ID",
+        "HC_KEEP_INSTANCE",
+        "HC_CLEANUP_ON_QUOTA_EXCEEDED",
+        "HC_SSH_KEY",
+        "HC_IMAGE_WINDOWS_2012",
+        "HC_IMAGE_WINDOWS_2016",
+        "HC_IMAGE_WINDOWS_2019",
+        "HC_IMAGE_WINDOWS_2022",
+        "HC_IMAGE_UBUNTU_16_04",
+        "HC_IMAGE_UBUNTU_18_04",
+        "HC_IMAGE_UBUNTU_20_04",
+        "HC_IMAGE_UBUNTU_22_04",
+        "HC_FLAVOR_NAME",
+        "HC_FLAVOR_ID",
+        "HC_INSTANCE_STORAGE_POLICY_ID",
+        "HC_INSTANCE_STORAGE_POLICY_NAME",
+        "HC_INSTANCE_STORAGE_POLICY_DB_ID"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Existing subnet",
+        "Existing storage policy",
+        "Provider image catalog",
+        "Provider flavor catalog"
+      ],
+      "expected_result": "Each selected image is attempted sequentially with exactly one VM per Terraform apply, 2 vCPU, 2 GB RAM, 40 GB root disk by default, password-based login input, and a valid OS-specific guest hostname. Quota precheck is disabled and quota is assumed sufficient before apply. After each success, run-log.html is updated, the created instance ID is persisted, and the next image is attempted. If instance_storage_quota_exceeded or instance_quota_exceeded occurs, execution stops immediately, failed_image and failure_reason are reported, remaining_images_not_attempted is reported, user_action_required=True is reported, and failed/created instances are retained by default.",
+      "terraform_resource_mapping": {
+        "resource": "fptcloud_instance",
+        "module": "modules/vm",
+        "fields": {
+          "name": "guest_hostname selected by compute.validate-instance-hostname; resource_name is reported separately and is not passed as the Windows computer name",
+          "vpc_id": "effective_vpc_id",
+          "image_name": "Current matrix image name resolved by compute.discover-instance-images",
+          "flavor_name": "2vCPU/2GB flavor name resolved by compute.discover-instance-flavor",
+          "subnet_id": "effective_subnet_id",
+          "storage_policy_id": "effective_storage_policy_id selected by compute.validate-instance-storage-policy",
+          "storage_size_gb": "HC_INSTANCE_DISK_SIZE_GB or HC_ROOT_DISK_SIZE, default 40; non-40 values are reduced_disk_test=True",
+          "status": "POWERED_ON",
+          "password": "generated_instance_password from generated_instance_password_policy",
+          "ssh_key": "HC_SSH_KEY only if configured",
+          "security_group_ids": "HC_SECURITY_GROUP_ID when set"
+        }
+      },
+      "validation_method": "Run only after compute.validate-instance-password-policy, compute.validate-instance-storage-policy, compute.validate-instance-hostname, compute.validate-instance-inputs, compute.select-instance-round, and compute.validate-instance-network-inputs succeed. Do not run compute.inspect-instance-quota or compute.validate-instance-quota for creation. Create selected images sequentially and apply only HC_INSTANCES_PER_APPLY=1 VM at a time. For each selected image, emit compute.create-instance:inputs before plan/apply with provider version, OS label, image used, image source, flavor used, flavor source, disk size, reduced_disk_test, effective_vpc_id, effective_subnet_id, effective_storage_policy_id, storage_policy_requested, selected_storage_policy_name, selected_storage_policy_id, selected_storage_policy_db_id, provider_field_used, subnet source, storage policy source, quota_precheck=disabled, quota_assumption=assume_sufficient, quota_exceeded_action=stop_and_wait_for_user, quota_source, quota_status, remaining_storage_gb, target_requested_disk_size_gb, run_status, user_action_required, batching policy, selected_images, successful_images, failed_image, failure_reason, remaining_images_not_attempted, unavailable_images, apply_requested_instance_count, apply_requested_storage_gb, apply_requested_cpu, apply_requested_ram_mb, resource_name, guest_hostname, selected_hostname, hostname_length, hostname_validation_status, instance network attachment fields, generated suffixes, password_generated=True/False, password_redacted=True, cleanup_policy, keep_instance, cleanup_on_quota_exceeded, delete_allowed, delete_reason, retained_instance_ids, deleted_instance_ids, skipped_delete_reason, public_ip_configured, security_group_configured, connection_test_policy=manual_verification_required, per-instance create result, retained/deleted result, and redacted Terraform variables. Never print passwords or secrets. If password policy validation, storage policy validation, hostname validation, input validation, sequential selection, network validation, or dependency discovery failed, skip without Terraform apply. If instance_storage_quota_exceeded or instance_quota_exceeded occurs, classify it, retain resources, set stop_on_quota_exceeded=True, run_status=blocked_waiting_user_confirmation, user_action_required=True, and remaining_images_not_attempted to the unattempted selected images. Do not delete, reclaim, recover, recreate, retry, or continue to the next image unless a future explicit user-confirmed recovery action is invoked.",
+      "identifier_policy": "Daily health checks must use image names discovered by compute.discover-instance-images, selected images from compute.select-instance-round, a 2vCPU/2GB flavor name discovered by compute.discover-instance-flavor, the exact Premium-SSD storage policy selected by compute.validate-instance-storage-policy, and guest hostnames selected by compute.validate-instance-hostname. Optional explicit image/flavor values are override/debug inputs only. Storage policy id_db is logging/debugging only. Diagnostics must print image used, image source, flavor source, flavor used, subnet source, storage policy source, storage_policy_requested, resource_name, guest_hostname, selected_hostname, hostname_length, hostname_validation_status, disk size, batching policy, selected/successful/failed/not-attempted/unavailable images, per-apply requested quota, selected storage policy evidence, quota_precheck, quota_assumption, quota_exceeded_action, run_status, user_action_required, cleanup_policy, keep_instance setting, cleanup_on_quota_exceeded setting, delete_allowed, delete_reason, retained_instance_ids, deleted_instance_ids, and skipped_delete_reason.",
+      "report_events": [
+        "compute.create-instance:inputs",
+        "compute.create-instance",
+        "compute.create-instance:cleanup"
+      ],
+      "failure_classifications": [
+        "instance_missing_required_inputs",
+        "instance_image_unresolved",
+        "instance_flavor_unresolved",
+        "instance_password_missing",
+        "instance_password_policy_invalid",
+        "instance_hostname_invalid",
+        "instance_create_failed",
+        "instance_provider_error",
+        "instance_quota_exceeded",
+        "instance_storage_quota_exceeded",
+        "instance_storage_quota_exceeded_preflight",
+        "instance_cleanup_failed",
+        "instance_cleanup_not_allowed",
+        "instance_retained_by_policy",
+        "retained_failed_instance"
+      ],
+      "cleanup_behavior": "Retain created instances by default. Retain failed instances by default. Do not delete instances automatically after normal create attempts or quota exceeded. HC_CLEANUP_ON_QUOTA_EXCEEDED is non-operative for automatic quota failure handling. Cleanup requires explicit user confirmation after the run is blocked. Never delete discovered VPC, discovered subnet, discovered storage policy, security group, or any instance not created by this run.",
+      "generated_artifacts": [
+        "runs/<run_id>/compute.create-instance/",
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not print passwords or secrets",
+        "Do not create if validation fails",
+        "Do not create if network attachment validation fails",
+        "Do not create bare VM",
+        "Do not create if VPC, subnet, or storage policy discovery failed",
+        "Retain created and failed instances by default",
+        "Do not delete automatically after quota exceeded",
+        "Require explicit user confirmation for cleanup",
+        "Only clean up instances created by this run",
+        "Never clean up discovered/shared resources"
+      ],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.discover-subnet",
+        "compute.discover-storage-policy",
+        "compute.validate-instance-storage-policy",
+        "compute.discover-instance-images",
+        "compute.discover-instance-flavor",
+        "compute.validate-instance-password-policy",
+        "compute.validate-instance-hostname",
+        "compute.validate-instance-inputs",
+        "compute.select-instance-round",
+        "compute.validate-instance-network-inputs"
+      ],
+      "failure_classification": "instance_create_failed",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.cleanup-instance",
+      "manual_check_item": "Cleanup Compute Instances created by matrix run",
+      "purpose": "Manual cleanup gate for Compute Instances created by compute.create-instance. This stage must not run automatically after quota exceeded.",
+      "automation_status": "manual_only",
+      "required_inputs": [],
+      "optional_inputs": [
+        "HC_KEEP_INSTANCE",
+        "HC_CLEANUP_ON_QUOTA_EXCEEDED"
+      ],
+      "required_cloud_resources": [
+        "Temporary Compute Instances created by this run"
+      ],
+      "expected_result": "Created and failed instances are retained by default. Instances are deleted only after explicit user confirmation for cleanup. All retained, deleted, or skipped deletion decisions are reported.",
+      "terraform_resource_mapping": {
+        "resource": "fptcloud_instance",
+        "module": "modules/vm",
+        "fields": {
+          "id": "Instance IDs created by compute.create-instance"
+        }
+      },
+      "validation_method": "Run only after explicit user confirmation. Before deleting any instance, verify instance_id exists, the instance was created by current run, the instance name matches current run suffix, the instance is managed by the current run workspace, and deletion reason is user-confirmed cleanup. Do not target discovered or pre-existing resources. Emit cleanup_policy, keep_instance, cleanup_on_quota_exceeded, delete_allowed, delete_reason, retained_instance_ids, deleted_instance_ids, and skipped_delete_reason per created or failed instance.",
+      "identifier_policy": "Use Terraform state for resources created by this run; do not accept external instance IDs for cleanup in this stage.",
+      "report_events": [
+        "compute.cleanup-instance",
+        "compute.create-instance:cleanup"
+      ],
+      "failure_classifications": [
+        "instance_cleanup_failed",
+        "instance_cleanup_not_allowed",
+        "instance_retained_by_policy",
+        "retained_failed_instance"
+      ],
+      "cleanup_behavior": "Retain by default. Delete only current-run instances after explicit user confirmation and cleanup safety validation. If deletion is not allowed, skip deletion and classify instance_cleanup_not_allowed or instance_retained_by_policy as appropriate.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html"
+      ],
+      "safety_controls": [
+        "Never delete discovered VPC, subnet, storage policy, or existing security group",
+        "Never clean up resources outside the current run workspace",
+        "Never delete instances not created by this run",
+        "Require quota cleanup reason before deletion"
+      ],
+      "dependency_stages": [
+        "compute.create-instance"
+      ],
+      "failure_classification": "instance_cleanup_failed",
       "safe_for_daily_run": true
     },
     {
       "id": "compute.vm-windows-2012",
       "manual_check_item": "Create Windows VM 2012",
       "automation_status": "blocked",
-      "required_inputs": ["HC_WINDOWS_2012_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_WINDOWS_2012_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Windows Server 2012 VM is created and visible in provider state.",
       "validation_method": "Terraform VM module once image/flavor/key IDs are confirmed.",
       "cleanup_behavior": "Destroy VM; retain only resources explicitly defined by the test.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -160,12 +1640,25 @@
       "id": "compute.vm-windows-2016",
       "manual_check_item": "Create Windows VM 2016",
       "automation_status": "blocked",
-      "required_inputs": ["HC_WINDOWS_2016_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_WINDOWS_2016_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Windows Server 2016 VM is created.",
       "validation_method": "Terraform VM module once image/flavor/key IDs are confirmed.",
       "cleanup_behavior": "Destroy VM.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -173,12 +1666,25 @@
       "id": "compute.vm-windows-2019",
       "manual_check_item": "Create Windows VM 2019",
       "automation_status": "blocked",
-      "required_inputs": ["HC_WINDOWS_2019_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_WINDOWS_2019_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Windows Server 2019 VM is created.",
       "validation_method": "Terraform VM module once image/flavor/key IDs are confirmed.",
       "cleanup_behavior": "Destroy VM.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -186,12 +1692,25 @@
       "id": "compute.vm-windows-2022",
       "manual_check_item": "Create Windows VM 2022",
       "automation_status": "blocked",
-      "required_inputs": ["HC_WINDOWS_2022_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_WINDOWS_2022_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Windows Server 2022 VM is created.",
       "validation_method": "Terraform VM module once image/flavor/key IDs are confirmed.",
       "cleanup_behavior": "Destroy VM.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -199,12 +1718,25 @@
       "id": "compute.vm-ubuntu-16.04",
       "manual_check_item": "Create Ubuntu VM 16.04",
       "automation_status": "blocked",
-      "required_inputs": ["HC_UBUNTU_1604_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_UBUNTU_1604_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Ubuntu 16.04 VM is created.",
       "validation_method": "Terraform VM module once image/flavor/key IDs are confirmed.",
       "cleanup_behavior": "Destroy VM.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -212,12 +1744,25 @@
       "id": "compute.vm-ubuntu-18.04",
       "manual_check_item": "Create Ubuntu VM 18.04",
       "automation_status": "blocked",
-      "required_inputs": ["HC_UBUNTU_1804_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_UBUNTU_1804_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Ubuntu 18.04 VM is created.",
       "validation_method": "Terraform VM module once image/flavor/key IDs are confirmed.",
       "cleanup_behavior": "Destroy VM.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -225,12 +1770,25 @@
       "id": "compute.vm-ubuntu-20.04",
       "manual_check_item": "Create Ubuntu VM 20.04",
       "automation_status": "partially_automated",
-      "required_inputs": ["HC_UBUNTU_2004_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_UBUNTU_2004_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Ubuntu 20.04 VM is created and reaches provider-ready state.",
       "validation_method": "Terraform VM module and provider state inspection; guest OS access is not guaranteed for bare instances without network access.",
       "cleanup_behavior": "Destroy VM and temporary resources.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -238,12 +1796,25 @@
       "id": "compute.vm-ubuntu-22.04",
       "manual_check_item": "Create Ubuntu VM 22.04",
       "automation_status": "partially_automated",
-      "required_inputs": ["HC_UBUNTU_2204_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Subnet", "Storage policy"],
+      "required_inputs": [
+        "HC_UBUNTU_2204_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet",
+        "Storage policy"
+      ],
       "expected_result": "Temporary Ubuntu 22.04 VM is created and reaches provider-ready state.",
       "validation_method": "Terraform VM module and provider state inspection; guest OS access is not guaranteed for bare instances without network access.",
       "cleanup_behavior": "Destroy VM and temporary resources.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -251,12 +1822,24 @@
       "id": "compute.resize-vm",
       "manual_check_item": "Resize VM from 2vCPU/2GB to 4vCPU/4GB",
       "automation_status": "partially_automated",
-      "required_inputs": ["HC_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_UPSIZE_FLAVOR_NAME", "HC_SSH_KEY", "HC_SUBNET_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["Temporary VM"],
+      "required_inputs": [
+        "HC_IMAGE_NAME",
+        "HC_FLAVOR_NAME",
+        "HC_UPSIZE_FLAVOR_NAME",
+        "HC_SSH_KEY",
+        "HC_SUBNET_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "Temporary VM"
+      ],
       "expected_result": "VM is created with upsize flavor and reaches provider-ready state.",
       "validation_method": "Terraform VM module with larger flavor; true in-place resize needs provider/API support.",
       "cleanup_behavior": "Destroy VM.",
-      "dependency_stages": ["compute.discover-subnet", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-subnet",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": false
     },
@@ -265,7 +1848,9 @@
       "manual_check_item": "Resize OS disk from 40GB to 80GB",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM"],
+      "required_cloud_resources": [
+        "VM"
+      ],
       "expected_result": "OS disk capacity is expanded.",
       "validation_method": "No safe repository implementation exists.",
       "cleanup_behavior": "Manual cleanup if tested outside automation.",
@@ -277,12 +1862,22 @@
       "id": "compute.add-disk",
       "manual_check_item": "Add 40GB disk and attach to VM",
       "automation_status": "partially_automated",
-      "required_inputs": ["HC_VPC_ID", "HC_STORAGE_POLICY_ID"],
-      "required_cloud_resources": ["VPC", "Storage policy", "Optional VM instance ID"],
+      "required_inputs": [
+        "HC_VPC_ID",
+        "HC_STORAGE_POLICY_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Storage policy",
+        "Optional VM instance ID"
+      ],
       "expected_result": "A temporary 40GB disk is created; attach is attempted only when HC_INSTANCE_ID is supplied.",
       "validation_method": "Terraform disk module and provider state inspection.",
       "cleanup_behavior": "Always destroy disk resources created by the stage.",
-      "dependency_stages": ["compute.discover-vpc", "compute.discover-storage-policy"],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.discover-storage-policy"
+      ],
       "failure_classification": "configuration_missing",
       "safe_for_daily_run": true
     },
@@ -291,7 +1886,10 @@
       "manual_check_item": "Delete VM and verify attached disk is retained",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM", "Attached disk"],
+      "required_cloud_resources": [
+        "VM",
+        "Attached disk"
+      ],
       "expected_result": "VM is deleted and attached data disk is retained.",
       "validation_method": "No safe repository implementation exists.",
       "cleanup_behavior": "Manual cleanup required.",
@@ -304,7 +1902,9 @@
       "manual_check_item": "Schedule VM power on/off",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM"],
+      "required_cloud_resources": [
+        "VM"
+      ],
       "expected_result": "Power schedule is created and executes.",
       "validation_method": "No safe API/tool exists in this repository.",
       "cleanup_behavior": "Manual cleanup required.",
@@ -317,7 +1917,9 @@
       "manual_check_item": "Create VM snapshot",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM"],
+      "required_cloud_resources": [
+        "VM"
+      ],
       "expected_result": "Snapshot is created.",
       "validation_method": "No safe repository implementation exists.",
       "cleanup_behavior": "Manual cleanup required.",
@@ -330,11 +1932,15 @@
       "manual_check_item": "Revert VM snapshot",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM snapshot"],
+      "required_cloud_resources": [
+        "VM snapshot"
+      ],
       "expected_result": "VM is reverted from snapshot.",
       "validation_method": "No safe repository implementation exists.",
       "cleanup_behavior": "Manual cleanup required.",
-      "dependency_stages": ["compute.snapshot-create"],
+      "dependency_stages": [
+        "compute.snapshot-create"
+      ],
       "failure_classification": "unsupported_provider_operation",
       "safe_for_daily_run": false
     },
@@ -343,7 +1949,10 @@
       "manual_check_item": "Assign public IP to VM",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM", "Public IP"],
+      "required_cloud_resources": [
+        "VM",
+        "Public IP"
+      ],
       "expected_result": "VM has public IP connectivity.",
       "validation_method": "No safe repository implementation exists.",
       "cleanup_behavior": "Manual cleanup required.",
@@ -355,12 +1964,20 @@
       "id": "network.security-group",
       "manual_check_item": "Create security group allowing only RDP 3389 and SSH 22",
       "automation_status": "automated",
-      "required_inputs": ["HC_SUBNET_ID"],
-      "required_cloud_resources": ["VPC", "Subnet"],
+      "required_inputs": [
+        "HC_SUBNET_ID"
+      ],
+      "required_cloud_resources": [
+        "VPC",
+        "Subnet"
+      ],
       "expected_result": "Temporary security group is created with SSH/RDP ingress rules.",
       "validation_method": "Terraform security_group module and provider state inspection.",
       "cleanup_behavior": "Always destroy security group resources created by the stage.",
-      "dependency_stages": ["compute.discover-vpc", "compute.discover-subnet"],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "compute.discover-subnet"
+      ],
       "failure_classification": "blocked_missing_subnet_id",
       "safe_for_daily_run": true
     },
@@ -368,12 +1985,19 @@
       "id": "network.blocked-ports",
       "manual_check_item": "Verify blocked ports cannot connect",
       "automation_status": "manual_only",
-      "required_inputs": ["Reachable VM network path"],
-      "required_cloud_resources": ["VM", "Security group"],
+      "required_inputs": [
+        "Reachable VM network path"
+      ],
+      "required_cloud_resources": [
+        "VM",
+        "Security group"
+      ],
       "expected_result": "Ports outside SSH/RDP are blocked.",
       "validation_method": "Manual or external network probe; no safe internal probe exists.",
       "cleanup_behavior": "None.",
-      "dependency_stages": ["network.security-group"],
+      "dependency_stages": [
+        "network.security-group"
+      ],
       "failure_classification": "manual_validation_required",
       "safe_for_daily_run": false
     },
@@ -381,12 +2005,19 @@
       "id": "network.outbound-http-https",
       "manual_check_item": "Add outbound rules for HTTP/HTTPS 80/443",
       "automation_status": "blocked",
-      "required_inputs": ["HC_VPC_ID", "HC_SUBNET_ID"],
-      "required_cloud_resources": ["Security group"],
+      "required_inputs": [
+        "HC_VPC_ID",
+        "HC_SUBNET_ID"
+      ],
+      "required_cloud_resources": [
+        "Security group"
+      ],
       "expected_result": "Outbound HTTP/HTTPS rules are present.",
       "validation_method": "Terraform security_group module once rule semantics are confirmed.",
       "cleanup_behavior": "Destroy temporary security group.",
-      "dependency_stages": ["network.security-group"],
+      "dependency_stages": [
+        "network.security-group"
+      ],
       "failure_classification": "blocked_missing_subnet_id",
       "safe_for_daily_run": false
     },
@@ -395,11 +2026,15 @@
       "manual_check_item": "Discover existing subnet inventory before additional subnet creation",
       "automation_status": "automated",
       "required_inputs": [],
-      "required_cloud_resources": ["Existing VPC"],
+      "required_cloud_resources": [
+        "Existing VPC"
+      ],
       "expected_result": "Existing subnet names, IDs, CIDRs, gateways, and VPC IDs are collected when provider/API listing or HC_EXISTING_SUBNET_CIDRS is available.",
       "validation_method": "Attempt to collect existing subnet CIDRs in the effective VPC. If provider/API subnet listing is available, collect subnet name, subnet ID, CIDR, gateway, and VPC ID. If listing is unavailable, use HC_EXISTING_SUBNET_CIDRS as operator-provided inventory. Do not guess subnet ranges.",
       "cleanup_behavior": "No resources are created.",
-      "dependency_stages": ["compute.discover-vpc"],
+      "dependency_stages": [
+        "compute.discover-vpc"
+      ],
       "failure_classification": "subnet_cidr_overlap_preflight",
       "safe_for_daily_run": true
     },
@@ -407,12 +2042,20 @@
       "id": "network.additional-subnet",
       "manual_check_item": "Create additional subnet from configured non-overlapping CIDR",
       "automation_status": "automated",
-      "required_inputs": ["HC_ADDITIONAL_SUBNET_CIDR", "HC_ADDITIONAL_SUBNET_GATEWAY"],
-      "required_cloud_resources": ["VPC"],
+      "required_inputs": [
+        "HC_ADDITIONAL_SUBNET_CIDR",
+        "HC_ADDITIONAL_SUBNET_GATEWAY"
+      ],
+      "required_cloud_resources": [
+        "VPC"
+      ],
       "expected_result": "Temporary additional subnet is created.",
       "validation_method": "Terraform subnet module with explicit HC_ADDITIONAL_SUBNET_CIDR and HC_ADDITIONAL_SUBNET_GATEWAY. Select the additional subnet CIDR using MAX_SUBNET_CANDIDATE_ATTEMPTS from spec constants. Start with HC_ADDITIONAL_SUBNET_CIDR, validate against discovered existing subnet CIDRs, append overlaps to rejected_cidrs with conflict_source=preflight_inventory, then deterministically increment to the next predictable network block of the same prefix length. Emit network.select-additional-subnet-cidr with candidate_attempt_count, rejected_cidrs, selected_cidr, and overlap_reason. Emit network.additional-subnet:attempt before each apply and network.additional-subnet:overlap-detected when provider error_code=804007 is returned. If Terraform apply fails with explicit subnet overlap error_code=804007, extract attempted CIDR and conflicting subnet name when available, append the attempted CIDR to the runtime conflict list with conflict_source=provider_error, destroy/cleanup any partial resources, select the next non-overlapping candidate, and retry. Stop when subnet creation succeeds or MAX_SUBNET_CANDIDATE_ATTEMPTS is reached. Do not retry unknown errors or provider/backend system errors. If the limit is reached, skip/stop Terraform apply with subnet_cidr_exhausted and report all attempted CIDRs.",
       "cleanup_behavior": "Always run terraform destroy for the stage workspace.",
-      "dependency_stages": ["compute.discover-vpc", "network.discover-existing-subnets"],
+      "dependency_stages": [
+        "compute.discover-vpc",
+        "network.discover-existing-subnets"
+      ],
       "failure_classification": "subnet_cidr_overlap",
       "safe_for_daily_run": true
     },
@@ -421,11 +2064,16 @@
       "manual_check_item": "Add additional NIC to VM and verify inside OS",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM", "Additional subnet"],
+      "required_cloud_resources": [
+        "VM",
+        "Additional subnet"
+      ],
       "expected_result": "VM has second NIC visible inside guest OS.",
       "validation_method": "No safe repository implementation exists.",
       "cleanup_behavior": "Manual cleanup required.",
-      "dependency_stages": ["network.additional-subnet"],
+      "dependency_stages": [
+        "network.additional-subnet"
+      ],
       "failure_classification": "unsupported_provider_operation",
       "safe_for_daily_run": false
     },
@@ -434,7 +2082,10 @@
       "manual_check_item": "Create test file, create VM backup, run backup job, delete file, restore VM, verify file",
       "automation_status": "unsupported",
       "required_inputs": [],
-      "required_cloud_resources": ["VM", "Backup service"],
+      "required_cloud_resources": [
+        "VM",
+        "Backup service"
+      ],
       "expected_result": "Restored VM contains the test file.",
       "validation_method": "No safe repository implementation exists.",
       "cleanup_behavior": "Manual cleanup required.",
@@ -446,8 +2097,12 @@
       "id": "object-storage.bucket",
       "manual_check_item": "Create bucket, upload file, create folder, open file, connect S3 endpoint, delete file, delete bucket",
       "automation_status": "partially_automated",
-      "required_inputs": ["HC_ENABLED_OBJECT_REGIONS"],
-      "required_cloud_resources": ["Object storage region"],
+      "required_inputs": [
+        "HC_ENABLED_OBJECT_REGIONS"
+      ],
+      "required_cloud_resources": [
+        "Object storage region"
+      ],
       "expected_result": "Temporary bucket is created in an enabled region and destroyed.",
       "validation_method": "Terraform object_storage module; browser and S3 Browser checks remain manual.",
       "cleanup_behavior": "Always destroy object storage resources created by the stage.",
@@ -493,6 +2148,319 @@
       "dependency_stages": [],
       "failure_classification": "manual_validation_required",
       "safe_for_daily_run": false
+    },
+    {
+      "id": "compute.select-vpc",
+      "manual_check_item": "Select target VPC for the current rolling round",
+      "purpose": "Iterate TARGET_VPCS in round-robin order and pick the current VPC for the rolling lifecycle.",
+      "automation_status": "not_implemented",
+      "implementation_note": "VPC iteration exists internally within the runner but this named stage is not implemented. The vpc.selected event is not currently emitted. The runner iterates VPCs internally without surfacing a named stage event. This stage must remain not_implemented until vpc.selected emission is added to the Python runner.",
+      "required_inputs": [
+        "effective_vpc_id"
+      ],
+      "optional_inputs": [
+        "VPC_IDS",
+        "TARGET_VPCS"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC"
+      ],
+      "expected_result": "Future: Records the selected VPC name and effective_vpc_id for the round and emits vpc.selected. Per-VPC discovery (subnet, storage policy, flavor, image) runs downstream for the selected VPC.",
+      "validation_method": "Future: Resolve TARGET_VPCS from VPC_IDS. For each VPC in order, emit vpc.selected with vpc_name and effective_vpc_id, then run the existing per-VPC discovery and create pipeline. Do not proceed to the next VPC until the current VPC single VM is created, validated, and kept (or recorded quota-blocked).",
+      "report_events": [],
+      "report_events_future": [
+        "vpc.selected"
+      ],
+      "failure_classifications": [
+        "vpc_selection_failed"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not mutate VPCs",
+        "Do not print secrets"
+      ],
+      "dependency_stages": [],
+      "failure_classification": "vpc_selection_failed",
+      "safe_for_daily_run": true,
+      "identifier_policy": "Use VPC_IDS entries resolved by compute.discover-vpc. Do not synthesize VPC ids."
+    },
+    {
+      "id": "compute.validate-instance-active",
+      "manual_check_item": "Wait for ACTIVE and validate created Compute Instance",
+      "purpose": "After each create, wait until the instance reaches the ACTIVE/POWERED_ON equivalent and validate provider-observable health before the next image.",
+      "automation_status": "not_implemented",
+      "implementation_note": "The Terraform provider resource wait implicitly handles POWERED_ON/POWERED_OFF state polling during apply. There is no separate Python validation poll, no instance.validated event emission, no network attachment validation, no IP assignment check, and no metadata validation in the current implementation. Instance state errors surfaced by Terraform during apply are classified as instance_provider_error (non-quota) and handled per INSTANCE_PROVIDER_ERROR_BEHAVIOR. This stage must remain not_implemented until the named Python validation stage and instance.validated emission are added.",
+      "required_inputs": [
+        "effective_vpc_id",
+        "effective_subnet_id"
+      ],
+      "optional_inputs": [
+        "HC_INSTANCE_ACTIVE_TIMEOUT_S",
+        "HC_INSTANCE_ACTIVE_POLL_S"
+      ],
+      "required_cloud_resources": [
+        "Compute Instance created by this run"
+      ],
+      "expected_result": "Future: Reports instance status, network attachment (vpc_id+subnet_id), IP assignment (private_ip; public_ip when configured), password generated/redacted, metadata (name, hostname, flavor, storage_policy_id), and boot verification state, then emits instance.validated.",
+      "validation_method": "Future: Poll fptcloud_instance/terraform show until status is the ACTIVE/POWERED_ON equivalent up to INSTANCE_ACTIVE_TIMEOUT_S at INSTANCE_ACTIVE_POLL_S intervals. Validate status, network attachment, IP assignment, password generation policy, and metadata. Boot success is report-only (manual_verification_required) and classified instance_boot_unverified as a warning, not a failure, until an in-guest probe is specced. Non-quota validation failure classifies instance_validation_failed and the instance is retained.",
+      "report_events": [],
+      "report_events_future": [
+        "instance.validated"
+      ],
+      "failure_classifications": [
+        "instance_validation_failed",
+        "instance_boot_unverified",
+        "instance_not_active"
+      ],
+      "cleanup_behavior": "Retain by default; no deletion.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not print passwords or secrets",
+        "Retain instances by default",
+        "Do not delete on validation failure"
+      ],
+      "dependency_stages": [
+        "compute.create-instance"
+      ],
+      "failure_classification": "instance_validation_failed",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.detect-quota-exceeded",
+      "manual_check_item": "Classify provider quota rejection at apply",
+      "purpose": "Detect and classify provider quota rejections, then stop the run and wait for explicit user confirmation.",
+      "automation_status": "automated",
+      "required_inputs": [],
+      "optional_inputs": [
+        "HC_STOP_ON_QUOTA_EXCEEDED"
+      ],
+      "required_cloud_resources": [],
+      "expected_result": "When the provider apply fails with a quota rejection, emits quota.exceeded with the failed image, VPC, classification, quota_precheck=disabled, quota_assumption=assume_sufficient, quota_exceeded_action=stop_and_wait_for_user, run_status=blocked_waiting_user_confirmation, remaining_images_not_attempted, and user_action_required=True.",
+      "validation_method": "Match provider apply stderr against QUOTA_RECOVERY_POLICY trigger_phrases/classifications. On match emit quota.exceeded, retain resources, stop the run, and do not call compute.reclaim-health-check-instance, compute.recover-instance-quota, or compute.recreate-instance unless a future explicit user-confirmed recovery action is invoked.",
+      "report_events": [
+        "quota.exceeded"
+      ],
+      "failure_classifications": [
+        "instance_storage_quota_exceeded",
+        "instance_quota_exceeded"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not delete resources",
+        "Do not guess quota values",
+        "Do not auto-reclaim, auto-recover, auto-recreate, auto-retry, or continue"
+      ],
+      "dependency_stages": [
+        "compute.create-instance"
+      ],
+      "failure_classification": "instance_storage_quota_exceeded",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.reclaim-health-check-instance",
+      "manual_check_item": "Reclaim exactly one tag-scoped health-check VM in the same VPC",
+      "purpose": "Manual recovery action only. May free quota by deleting exactly one old, tag-and-name-proven health-check VM in the same VPC after explicit user confirmation.",
+      "automation_status": "manual_only",
+      "required_inputs": [
+        "effective_vpc_id"
+      ],
+      "optional_inputs": [
+        "FPTCLOUD_API_URL",
+        "FPTCLOUD_TOKEN"
+      ],
+      "required_cloud_resources": [
+        "Existing health-check Compute Instances (previous runs)"
+      ],
+      "expected_result": "Does not run automatically. When explicitly confirmed, lists instances in the same VPC (read), selects at most one eligible health-check VM by priority, deletes it via Terraform import+destroy, waits for completion, and emits instance.deleted. If none eligible, classifies health_check_instance_not_found and deletes nothing.",
+      "validation_method": "Run only after explicit user confirmation. Reclamation read via direct HTTP GET (FR-003 read). Eligibility requires a health-check tag (managed_by=health-check or health_check=true) AND an HC name pattern AND not the current run VM. Delete at most one via terraform import then destroy -target; never customer/non-health-check/discovered resources. Fail-closed on any ambiguity.",
+      "report_events": [
+        "instance.deleted"
+      ],
+      "failure_classifications": [
+        "health_check_instance_not_found",
+        "health_check_instance_delete_failed"
+      ],
+      "cleanup_behavior": "No automatic cleanup. After explicit user confirmation, destroy at most one tag-and-name-proven health-check instance via Terraform import+destroy; retain everything else; fail-closed when ownership is unproven.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Delete only tag-AND-name proven health-check VMs",
+        "Never delete the current run VM",
+        "At most one deletion per quota event",
+        "Never delete customer/discovered resources",
+        "Fail closed on ambiguity"
+      ],
+      "dependency_stages": [
+        "compute.detect-quota-exceeded"
+      ],
+      "failure_classification": "health_check_instance_not_found",
+      "safe_for_daily_run": true,
+      "identifier_policy": "Select by provider instance id from the VPC inventory read; cross-check tags and HC name pattern; order by hc_created_at/created_at."
+    },
+    {
+      "id": "compute.recover-instance-quota",
+      "manual_check_item": "Recompute structural quota snapshot after reclamation",
+      "purpose": "Manual recovery marker after an explicitly confirmed reclamation. No numeric quota exists (C-012); this is an event marker, not a measured free-space confirmation.",
+      "automation_status": "manual_only",
+      "required_inputs": [
+        "effective_vpc_id"
+      ],
+      "optional_inputs": [],
+      "required_cloud_resources": [],
+      "expected_result": "Does not run automatically. When explicitly confirmed after reclamation, records quota_source=manual_user_confirmed_recovery and reclaimed_instance_id, keeps numeric quota not_available, and emits quota.recovered.",
+      "validation_method": "Run only after explicit user confirmation. Do not claim measured free space.",
+      "report_events": [
+        "quota.recovered"
+      ],
+      "failure_classifications": [
+        "quota_recovery_exhausted",
+        "instance_quota_recovered"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not guess quota values",
+        "Do not delete resources"
+      ],
+      "dependency_stages": [
+        "compute.reclaim-health-check-instance"
+      ],
+      "failure_classification": "quota_recovery_exhausted",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.recreate-instance",
+      "manual_check_item": "Retry the blocked Compute Instance create once",
+      "purpose": "Manual recovery action only. Retry the blocked image create only after explicit user confirmation.",
+      "automation_status": "manual_only",
+      "required_inputs": [
+        "effective_vpc_id",
+        "effective_subnet_id",
+        "effective_storage_policy_id"
+      ],
+      "optional_inputs": [
+        "HC_MAX_INSTANCE_CREATE_RETRY",
+        "HC_MAX_QUOTA_RECOVERY_ATTEMPTS"
+      ],
+      "required_cloud_resources": [
+        "Existing VPC",
+        "Existing subnet",
+        "Existing storage policy"
+      ],
+      "expected_result": "Does not run automatically. When explicitly confirmed, re-applies only the blocked image create and emits instance.recreated on success.",
+      "validation_method": "Run only after explicit user confirmation. Retry only the same blocked image with one VM per apply. Do not continue to other images as part of automatic quota handling.",
+      "report_events": [
+        "instance.recreated"
+      ],
+      "failure_classifications": [
+        "instance_recreate_failed",
+        "instance_storage_quota_exceeded",
+        "quota_recovery_exhausted"
+      ],
+      "cleanup_behavior": "Retain created instances by default; no automatic deletion.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not print passwords or secrets",
+        "One VM per apply",
+        "Retain by default",
+        "Bounded retries only"
+      ],
+      "dependency_stages": [
+        "compute.recover-instance-quota"
+      ],
+      "failure_classification": "instance_recreate_failed",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.skip-unavailable-image",
+      "manual_check_item": "Skip permanently-unavailable images",
+      "purpose": "Record UNAVAILABLE_IMAGES as skipped without attempting creation.",
+      "automation_status": "automated",
+      "required_inputs": [
+        "discovered_instance_images"
+      ],
+      "optional_inputs": [],
+      "required_cloud_resources": [],
+      "expected_result": "Records ubuntu-16-04 and ubuntu-18-04 as permanently unavailable and emits image.skipped; these images are never attempted.",
+      "validation_method": "Use UNAVAILABLE_IMAGES from ROLLING_INSTANCE_STRATEGY. Emit image.skipped for each with reason image_unavailable_in_region. Do not attempt create for skipped images.",
+      "report_events": [
+        "image.skipped"
+      ],
+      "failure_classifications": [
+        "image_unavailable_in_region"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not attempt unavailable images"
+      ],
+      "dependency_stages": [
+        "compute.discover-instance-images"
+      ],
+      "failure_classification": "image_unavailable_in_region",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "compute.complete-instance-round",
+      "manual_check_item": "Complete a rolling round across all target VPCs",
+      "purpose": "Summarize a round after one VM per VPC has been attempted/created/validated and emit round.completed.",
+      "automation_status": "automated",
+      "required_inputs": [],
+      "optional_inputs": [],
+      "required_cloud_resources": [],
+      "expected_result": "Emits round.completed with per-VPC results: created/validated images, quota-blocked images, reclamations performed, and recovery outcomes.",
+      "validation_method": "Emit round.completed only after every TARGET_VPCS entry has had its single VM created+validated or recorded quota-blocked. Record an incomplete round as round_incomplete and continue.",
+      "report_events": [
+        "round.completed"
+      ],
+      "failure_classifications": [
+        "round_incomplete"
+      ],
+      "cleanup_behavior": "No resources are created.",
+      "generated_artifacts": [
+        "log.html",
+        "run-log.html",
+        "implementation-notes.md"
+      ],
+      "safety_controls": [
+        "Do not delete resources",
+        "Do not print secrets"
+      ],
+      "dependency_stages": [
+        "compute.select-vpc",
+        "compute.create-instance"
+      ],
+      "failure_classification": "round_incomplete",
+      "safe_for_daily_run": true
     }
   ]
 }

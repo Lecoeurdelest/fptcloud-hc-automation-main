@@ -224,6 +224,8 @@ Run with: `make test-integration` (pytest marker: `@pytest.mark.integration`)
 - [ ] **T-1206** — Live runner places non-ready post-apply resources in a pending queue and polls before verdict (phase: P5.T9)
 - [ ] **T-1207** — Live runner writes terminal failures to an error queue with resource and reason (phase: P5.T9)
 - [ ] **T-1208** — Live runner prevents resource conflicts with per-group locks and releases locks after destroy (phase: P5.T9)
+- [ ] **T-1209** — Live runner disables quota prechecks, classifies provider quota exceeded, retains resources, stops without attempting later images, and reports `user_action_required=True` (phase: P5.T9)
+- [ ] **T-1210** — Live runner selects `Premium-SSD` by exact name, passes provider-facing `id` as VM `storage_policy_id`, logs `id_db` only for debugging, and does not select `Premium-SSD-4000` by partial match (phase: P5.T9)
 
 ### Database integration
 

@@ -189,8 +189,9 @@ queue, honoring dependencies.
 - [ ] **P3.T4** — `Producer` CLI: `--checklist <path> --run-id <id>
       [--dry-run]`. Inserts the `hc_runs` row, enqueues ready tasks, watches
       Postgres for completions to unblock children.
-- [ ] **P3.T5** — Pre-flight quota check: query data sources, abort if any
-      resource limit is < 1.2× demand.
+- [ ] **P3.T5** — Optimistic quota apply: do not query quota data sources or
+      abort before apply; classify provider quota rejection and stop waiting for
+      explicit user confirmation.
 - [ ] **P3.T6** — Resumability: if `run_id` exists, skip PASSED tasks,
       re-enqueue PENDING/FAILED. This is just the unique-key contract —
       verify behavior.
@@ -199,7 +200,7 @@ queue, honoring dependencies.
       schedule, TC-015/16 snapshot, TC-017/18 backup) with
       `gap: provider_resource_missing` and an `expected.type: manual` fallback.
 - [ ] **P3.T8** — Tests: schema validation, dedup on re-submit, dependency
-      unblocking, quota pre-flight failure path.
+      unblocking, optimistic quota stop-and-wait path.
 
 ### DoD
 

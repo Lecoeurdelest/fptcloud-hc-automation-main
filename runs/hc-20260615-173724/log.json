@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2026-06-15T17:37:24+0700",
+    "run_id": "hc-20260615-173724",
+    "stage": "compute.validate-instance-network-inputs",
+    "status": "skipped",
+    "message": "Classification: instance_network_attachment_missing",
+    "details": "Classification: instance_network_attachment_missing; errors=ubuntu-22-04: subnet_id network attachment is required; generated_suffix=p8ym0jg7ilbd; effective_vpc_id=vpc-a; effective_subnet_id=subnet-a; effective_storage_policy_id=sp-a; network_attachment_fields=vpc_id,subnet_id; subnet_vpc_membership=not_verified; security_group_configured=False; public_ip_configured=False; connection_test_policy=manual_verification_required; instance_names=hc-vm-ubuntu-22-04-abc123def456; terraform_network_vars={\"security_group_ids\": [], \"storage_policy_id\": \"sp-a\", \"subnet_id\": \"\", \"vpc_id\": \"vpc-a\"} Resources: module.this.fptcloud_instance.this",
+    "classification": "instance_network_attachment_missing",
+    "resource": "module.this.fptcloud_instance.this",
+    "os_label": "",
+    "attempt": 0
+  }
+]

@@ -19,10 +19,85 @@ LOCK_CANDIDATES = [
 
 SECRET_KEYS = ("TOKEN", "PASSWORD", "SECRET", "KEY_MATERIAL", "PRIVATE")
 REDACT_EXACT = {"HC_SSH_KEY"}
+REQUIRED_ENV_PRESENCE = (
+    "FPTCLOUD_TOKEN",
+    "FPTCLOUD_REGION",
+    "FPTCLOUD_TENANT_NAME",
+)
+
+INSTANCE_IMAGE_MATRIX = (
+    ("windows-2012", "HC_IMAGE_WINDOWS_2012"),
+    ("windows-2016", "HC_IMAGE_WINDOWS_2016"),
+    ("windows-2019", "HC_IMAGE_WINDOWS_2019"),
+    ("windows-2022", "HC_IMAGE_WINDOWS_2022"),
+    ("ubuntu-16-04", "HC_IMAGE_UBUNTU_16_04"),
+    ("ubuntu-18-04", "HC_IMAGE_UBUNTU_18_04"),
+    ("ubuntu-20-04", "HC_IMAGE_UBUNTU_20_04"),
+    ("ubuntu-22-04", "HC_IMAGE_UBUNTU_22_04"),
+)
+
+
+def parse_dotenv_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None
+    key, value = stripped.split("=", 1)
+    key = key.strip()
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return (key, value) if key else None
+
+
+def load_dotenv(path: Path = ROOT / ".env", *, override: bool = False) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "cwd": str(Path.cwd()),
+        "path": str(path),
+        "found": path.exists(),
+        "loaded": [],
+        "skipped_existing": [],
+    }
+    if not path.exists():
+        return result
+    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+        parsed = parse_dotenv_line(raw)
+        if not parsed:
+            continue
+        key, value = parsed
+        if key in os.environ and not override:
+            result["skipped_existing"].append(key)
+            continue
+        os.environ[key] = value
+        result["loaded"].append(key)
+    return result
+
+
+DOTENV_RESULT = load_dotenv()
 
 
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def env_present(requirement: str) -> bool:
+    if " or " in requirement:
+        return any(env_present(part.strip()) for part in requirement.split(" or "))
+    return bool(env(requirement))
+
+
+def environment_diagnostics() -> dict[str, Any]:
+    return {
+        "cwd": DOTENV_RESULT.get("cwd", str(Path.cwd())),
+        "dotenv_path": DOTENV_RESULT.get("path", str(ROOT / ".env")),
+        "dotenv_found": bool(DOTENV_RESULT["found"]),
+        "dotenv_loaded": bool(DOTENV_RESULT["loaded"]),
+        "dotenv_loaded_count": len(DOTENV_RESULT["loaded"]),
+        "dotenv_skipped_existing_count": len(DOTENV_RESULT["skipped_existing"]),
+        "required_presence": {
+            requirement: "present" if env_present(requirement) else "missing"
+            for requirement in REQUIRED_ENV_PRESENCE
+        },
+    }
 
 
 def redact(name: str, value: Any) -> Any:
@@ -107,6 +182,9 @@ def stage_inputs() -> dict[str, Any]:
     selected_vpc = context["selected_vpc"]
     subnet_id = env("HC_SUBNET_ID")
     storage_policy_id = env("HC_STORAGE_POLICY_ID")
+    instance_storage_policy_id = env("HC_INSTANCE_STORAGE_POLICY_ID")
+    instance_storage_policy_name = env("HC_INSTANCE_STORAGE_POLICY_NAME")
+    instance_storage_policy_db_id = env("HC_INSTANCE_STORAGE_POLICY_DB_ID")
     return {
         "discover_storage_policy": {
             "terraform_data_source": "data.fptcloud_storage_policy.this",
@@ -151,14 +229,29 @@ def stage_inputs() -> dict[str, Any]:
             "will_run": bool(env("HC_ADDITIONAL_SUBNET_CIDR") and env("HC_ADDITIONAL_SUBNET_GATEWAY")),
         },
         "vm": {
-            "required_env": ["HC_IMAGE_NAME", "HC_FLAVOR_NAME", "HC_UPSIZE_FLAVOR_NAME", "HC_SSH_KEY"],
+            "required_env": [
+                "generated_instance_password",
+                "discovered_instance_flavor",
+                "discovered_instance_images",
+            ],
             "configured": {
-                "image_name": env("HC_IMAGE_NAME"),
+                "images": {
+                    label: {"env_var": var_name, "value": env(var_name)}
+                    for label, var_name in INSTANCE_IMAGE_MATRIX
+                },
+                "flavor_id": env("HC_FLAVOR_ID"),
                 "flavor_name": env("HC_FLAVOR_NAME"),
                 "upsize_flavor_name": env("HC_UPSIZE_FLAVOR_NAME"),
                 "ssh_key": redact("HC_SSH_KEY", env("HC_SSH_KEY")),
+                "password_policy": "generated_by_runner",
                 "subnet_id": subnet_id,
                 "storage_policy_id": storage_policy_id,
+                "instance_storage_policy_id": instance_storage_policy_id,
+                "instance_storage_policy_name": instance_storage_policy_name,
+                "instance_storage_policy_db_id": instance_storage_policy_db_id,
+                "instance_storage_policy_provider_field": env("HC_INSTANCE_STORAGE_POLICY_PROVIDER_FIELD", "id"),
+                "root_disk_size": env("HC_ROOT_DISK_SIZE", "40"),
+                "keep_instance": env("HC_KEEP_INSTANCE", "false"),
             },
         },
         "object_storage": {
@@ -175,6 +268,7 @@ def diagnostics() -> dict[str, Any]:
     context = base_context()
     return {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "environment": environment_diagnostics(),
         "provider": provider_lock(),
         "provider_config": context,
         "stage_inputs": stage_inputs(),
@@ -220,7 +314,14 @@ def effective_config() -> dict[str, Any]:
         "vpc_id_source": context["vpc_id_source"],
         "subnet_id": env("HC_SUBNET_ID"),
         "storage_policy_id": env("HC_STORAGE_POLICY_ID"),
-        "image_name": env("HC_IMAGE_NAME"),
+        "instance_storage_policy_id": env("HC_INSTANCE_STORAGE_POLICY_ID"),
+        "instance_storage_policy_name": env("HC_INSTANCE_STORAGE_POLICY_NAME"),
+        "instance_storage_policy_db_id": env("HC_INSTANCE_STORAGE_POLICY_DB_ID"),
+        "images": {
+            label: env(var_name)
+            for label, var_name in INSTANCE_IMAGE_MATRIX
+        },
+        "flavor_id": env("HC_FLAVOR_ID"),
         "flavor_name": env("HC_FLAVOR_NAME"),
         "upsize_flavor_name": env("HC_UPSIZE_FLAVOR_NAME"),
         "ssh_key": redact("HC_SSH_KEY", env("HC_SSH_KEY")),

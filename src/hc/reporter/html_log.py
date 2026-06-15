@@ -46,6 +46,7 @@ class HtmlProgressLog:
         html = Template(_html_template()).safe_substitute(
             rows=rows or self._empty_row(),
             summary=self._summary(),
+            timing=self._timing(),
         )
         self._path.write_text(html, encoding="utf-8")
 
@@ -73,6 +74,21 @@ class HtmlProgressLog:
         if warnings:
             return f"{total} stages recorded, {warnings} pending or duplicate."
         return f"{total} stages recorded successfully."
+
+    def _timing(self) -> str:
+        if not self._events:
+            return "Elapsed runtime: 0s. Estimated total runtime: calculating."
+        elapsed = self._events[-1].timestamp - self._events[0].timestamp
+        seconds = max(0, int(round(elapsed.total_seconds())))
+        minutes, remaining_seconds = divmod(seconds, 60)
+        hours, remaining_minutes = divmod(minutes, 60)
+        if hours:
+            formatted = f"{hours}h {remaining_minutes}m {remaining_seconds}s"
+        elif remaining_minutes:
+            formatted = f"{remaining_minutes}m {remaining_seconds}s"
+        else:
+            formatted = f"{remaining_seconds}s"
+        return f"Elapsed runtime: {formatted}. Estimated total runtime: calculating."
 
     @staticmethod
     def _empty_row() -> str:
