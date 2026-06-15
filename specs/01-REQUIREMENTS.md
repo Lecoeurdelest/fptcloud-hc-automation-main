@@ -16,7 +16,12 @@ no-op (uniqueness guarantee).
 Every checkpoint that mutates infrastructure shall do so through the
 `fpt-corp/fptcloud` Terraform provider, invoked via the `python-terraform`
 SDK. Direct HTTP calls to the FPT Cloud control plane are forbidden for
-mutations (allowed only for validation reads).
+mutations (allowed only for validation reads). The tag-scoped health-check
+instance reclamation in `06-QUOTA-AWARE-ROLLING-STRATEGY.md` honors this:
+instance **inventory listing is a read** (permitted here), and the **deletion
+is performed through Terraform** (import + targeted destroy). A direct
+mutating `DELETE` is permitted only as the explicit, tag-guarded exception in
+**C-013**.
 
 ### FR-004 — Independent verdict
 Each checkpoint's pass/fail verdict shall come from the **Validator**, not
@@ -64,6 +69,54 @@ critical sections.
 ### FR-013 — Audit trail
 Every state transition (enqueued, started, succeeded, failed, dead-lettered,
 replayed) shall be persisted with timestamp, worker id, and attempt number.
+
+### FR-014 — Multi-VPC rolling VM validation
+The health-check runner shall validate VM creation across all VPCs in
+`TARGET_VPCS` (resolved from `VPC_IDS`) in round-robin order, creating exactly
+one VM per VPC per round and keeping each created VM. Governed by
+`06-QUOTA-AWARE-ROLLING-STRATEGY.md` §5.
+
+### FR-015 — One-at-a-time create and post-create validation
+Each VM shall be created one at a time, then waited to ACTIVE and validated for
+instance status, network attachment, IP assignment, password generation,
+metadata, and (best-effort/report-only) boot success before the next image is
+attempted. Governed by §6.
+
+### FR-015A — Exact Premium-SSD storage policy selection
+For Compute Instance creation, the runner shall request `Premium-SSD` by exact
+name, never by partial match, and shall not select `Premium-SSD-4000` for that
+request. Terraform VM creation shall pass the provider-facing storage policy
+`id` `3f359ae7-b64c-4491-84df-7ab3899400a5` as `storage_policy_id`; `id_db`
+`0334c678-d427-4654-beab-39067a145aca` is report/debug metadata only. If the
+exact requested policy is unresolved, classify
+`storage_policy_preferred_not_found` and skip instance creation.
+
+### FR-016 — Optimistic quota apply and stop
+The runner shall not perform Compute Instance quota prechecks. It shall assume
+quota is sufficient, proceed to Terraform plan/apply, and use the provider apply
+result as the authoritative quota check. On a provider quota rejection, the
+runner shall classify `instance_storage_quota_exceeded` or
+`instance_quota_exceeded`, stop immediately, retain created/failed resources,
+set `run_status=blocked_waiting_user_confirmation`, report
+`remaining_images_not_attempted`, and wait for explicit user confirmation before
+any cleanup, recovery, retry, or continuation. Governed by §7.
+
+### FR-017 — Tag-and-name scoped deletion safety
+Reclamation shall delete only instances proven health-check by **both** a
+health-check tag (`managed_by=health-check` or `health_check=true`) **and** an
+HC name pattern, never the current run's VM, and never more than one per quota
+event. Selection/deletion is fail-closed. Governed by §8.
+
+### FR-018 — Permanently-unavailable image skip
+Images in `UNAVAILABLE_IMAGES` (`ubuntu-16-04`, `ubuntu-18-04`) shall be skipped
+and recorded as `image.skipped`, never attempted. Governed by §4/§9.
+
+### FR-019 — Rolling-lifecycle report events
+`run-log.html`/`log.html` shall record the rolling-lifecycle events: `vpc.selected`,
+`instance.created`, `instance.validated`, `quota.exceeded`, `image.skipped`,
+`round.completed`, and the optimistic quota fields `quota_precheck=disabled`,
+`quota_assumption=assume_sufficient`, `quota_exceeded_action=stop_and_wait_for_user`,
+and `user_action_required=True` when quota blocks the run. Governed by §9.
 
 ## 2. Non-functional requirements
 
@@ -115,6 +168,17 @@ be ≥ 85% measured by `coverage.py`.
 ### NFR-011 — Linting & typing
 Code shall pass `ruff check`, `ruff format --check`, and `mypy --strict`
 on the queue, executor, validator, and CLI packages.
+
+### NFR-012 — Bounded quota stop
+Quota handling shall be idempotent and bounded by stopping at the first provider
+quota rejection. The runner shall perform zero automatic deletions, zero
+automatic recovery attempts, zero automatic retries, and shall not continue to
+the next image until the user explicitly confirms the next action.
+
+### NFR-013 — Proof-gated destruction
+No instance shall be deleted without verified ownership proof (health-check tag
+**and** HC name pattern). Missing tags, unreadable inventory, or import failure
+shall result in no deletion (fail-closed).
 
 ## 3. Constraints
 
@@ -168,6 +232,27 @@ post-apply `plan -detailed-exitcode` returning 0.
 The repository shall be MPL-2.0 (matching the upstream provider) unless an
 explicit decision is recorded otherwise.
 
+### C-012 — Reactive-only quota model
+The provider exposes no quota/usage/capacity read API or schema field for
+compute, VPC, or volume storage (proven in `quota-investigation-report.md`).
+Quota precheck shall be disabled and quota shall be assumed sufficient until
+provider apply proves otherwise. Quota figures shall never be guessed, and quota
+failures shall stop the run and wait for explicit user confirmation.
+
+### C-013 — Inventory read direct; deletion via Terraform
+Health-check instance inventory may be read via direct HTTP `GET` against
+`FPTCLOUD_API_URL` (an FR-003 read). No inventory read or deletion shall run
+automatically after quota exceeded. Any user-confirmed reclamation deletion shall
+be performed through Terraform (`import` + `destroy -target`). A direct mutating
+`DELETE` is not allowed as an automatic quota response.
+
+### C-014 — Centralized rolling constants
+All rolling-strategy tunables (`INSTANCE_DISK_GB`, `INSTANCE_VCPU`,
+`INSTANCE_RAM_MB`, `MAX_INSTANCE_CREATE_RETRY`, `MAX_QUOTA_RECOVERY_ATTEMPTS`,
+`TARGET_VPCS`, `SUPPORTED_IMAGES`, `UNAVAILABLE_IMAGES`, ACTIVE wait/poll) shall
+live in `health-check.json → constants.ROLLING_INSTANCE_STRATEGY` with same-named
+environment overrides; no tunable shall be hard-coded outside that section.
+
 ## 4. Out of scope (v1)
 
 - Distributed tracing (OpenTelemetry).
@@ -179,8 +264,11 @@ explicit decision is recorded otherwise.
 
 ## 5. Assumptions
 
-- The FPT Cloud tenant has sufficient quota for the full checklist (4
-  Windows VMs + 4 Ubuntu VMs + disks + IPs + buckets).
+- The FPT Cloud tenant may **not** have sufficient quota for the full checklist.
+  The rolling strategy (FR-016, `06-QUOTA-AWARE-ROLLING-STRATEGY.md`) assumes
+  quota is sufficient until provider apply rejects the create. On quota
+  exhaustion it stops and waits for explicit user instruction instead of
+  reclaiming, deleting, retrying, or continuing automatically.
 - The operator has a valid `FPTCLOUD_TOKEN` and `VPC_ID`.
 - A jump host (or direct routability) exists for in-VM validation probes.
 - The provider's behavior matches the documented resource set

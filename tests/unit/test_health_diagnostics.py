@@ -18,7 +18,7 @@ SPEC.loader.exec_module(diag)
 pytestmark = pytest.mark.unit
 
 
-def test_diagnostics_redacts_ssh_key_and_warns_on_vpc_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_diagnostics_redacts_instance_secrets_and_warns_on_vpc_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FPTCLOUD_REGION", "VN/HAN")
     monkeypatch.setenv("FPTCLOUD_TENANT_NAME", "tenant-a")
     monkeypatch.setenv("VPC_IDS", "name-like-vpc")
@@ -27,6 +27,12 @@ def test_diagnostics_redacts_ssh_key_and_warns_on_vpc_name(monkeypatch: pytest.M
     data = diag.diagnostics()
 
     assert data["stage_inputs"]["vm"]["configured"]["ssh_key"] == "<redacted>"
+    assert data["stage_inputs"]["vm"]["configured"]["password_policy"] == "generated_by_runner"
+    assert data["stage_inputs"]["vm"]["configured"]["keep_instance"] == "false"
+    assert "cwd" in data["environment"]
+    assert data["environment"]["dotenv_path"].endswith(".env")
+    assert data["environment"]["dotenv_found"] in {True, False}
+    assert data["environment"]["required_presence"]["FPTCLOUD_TOKEN"] in {"present", "missing"}
     assert any("compute.discover-vpc" in warning for warning in data["warnings"])
 
 
