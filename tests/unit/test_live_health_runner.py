@@ -135,7 +135,7 @@ def test_instance_storage_policy_db_id_is_debug_only_for_vm_creation(monkeypatch
 def test_instance_storage_policy_exact_name_does_not_select_premium_4000(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HC_INSTANCE_STORAGE_POLICY_NAME", "Premium-SSD")
     monkeypatch.setattr(
-        runner,
+        runner.discovery,
         "collected_storage_policies",
         lambda: [
             {
@@ -1044,7 +1044,7 @@ def test_instance_terraform_receives_password_only_through_environment(monkeypat
         captured["extra_env"] = extra_env
         return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
-    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(runner.terraform_executor, "run", fake_run)
 
     runner.run_instance_terraform(["terraform", "plan", "-input=false"], tmp_path, stage="compute.create-instance-test")
 
@@ -1194,16 +1194,16 @@ def test_keep_instance_true_prevents_cleanup(monkeypatch: pytest.MonkeyPatch, tm
     runner.instance_validation.update({"valid": True, "diagnostics": {}, "vars": {"instances": [{"label": "ubuntu-22-04", "vars": {"name": "hc-vm", "vpc_id": "vpc-a", "image_name": "img", "flavor_name": "2C2G", "storage_policy_id": "sp-a", "disk_gb": 40, "subnet_id": "subnet-a", "password": "secret", "ssh_key": None, "security_group_ids": []}}]}, "errors": []})
     cleaned: list[str] = []
     monkeypatch.setenv("HC_KEEP_INSTANCE", "true")
-    monkeypatch.setattr(runner, "RUN_ROOT", tmp_path)
-    monkeypatch.setattr(runner, "SETTLE_SECONDS", 0)
-    monkeypatch.setattr(runner, "resolve_instance_image_flavor", lambda vars, diagnostics: (vars, diagnostics, ""))
-    monkeypatch.setattr(runner, "planned_resources", lambda workspace: ["module.this.fptcloud_instance.this"])
-    monkeypatch.setattr(runner, "state_resources", lambda workspace: ["module.this.fptcloud_instance.this"])
-    monkeypatch.setattr(runner, "readiness", lambda workspace: (True, "resources are ready", ["module.this.fptcloud_instance.this"]))
-    monkeypatch.setattr(runner, "instance_id_from_state", lambda workspace: "instance-a")
-    monkeypatch.setattr(runner, "input_diagnostics", lambda: {"provider": {"source": "fpt-corp/fptcloud", "version": "0.3.50"}})
-    monkeypatch.setattr(runner, "cleanup_instance", lambda workspace, name: cleaned.append(name))
-    monkeypatch.setattr(runner, "run", lambda *_args, **_kwargs: type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    monkeypatch.setattr(runner.state, "RUN_ROOT", tmp_path)
+    monkeypatch.setattr(runner.state, "SETTLE_SECONDS", 0)
+    monkeypatch.setattr(runner.instance_runner, "resolve_instance_image_flavor", lambda vars, diagnostics: (vars, diagnostics, ""))
+    monkeypatch.setattr(runner.terraform_executor, "planned_resources", lambda workspace: ["module.this.fptcloud_instance.this"])
+    monkeypatch.setattr(runner.terraform_executor, "state_resources", lambda workspace: ["module.this.fptcloud_instance.this"])
+    monkeypatch.setattr(runner.terraform_executor, "readiness", lambda workspace: (True, "resources are ready", ["module.this.fptcloud_instance.this"]))
+    monkeypatch.setattr(runner.terraform_executor, "instance_id_from_state", lambda workspace: "instance-a")
+    monkeypatch.setattr(runner.instance_runner, "input_diagnostics", lambda: {"provider": {"source": "fpt-corp/fptcloud", "version": "0.3.50"}})
+    monkeypatch.setattr(runner.cleanup, "cleanup_instance", lambda workspace, name: cleaned.append(name))
+    monkeypatch.setattr(runner.terraform_executor, "run", lambda *_args, **_kwargs: type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})())
 
     check = runner.Check(
         name=runner.INSTANCE_CREATE_STAGE,

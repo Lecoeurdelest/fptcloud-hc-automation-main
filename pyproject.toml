@@ -67,3 +67,11 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# The live health-check runner package was extracted verbatim from
+# scripts/run_health_checks.py (which lived outside `src` and was never linted).
+# It carries long structured log-event strings (E501) and intentionally preserves
+# the pre-refactor branch structure (SIM114) and explicit subprocess PIPE usage
+# (UP022). These are behavior-preserving relaxations scoped to this package only.
+"src/healthcheck/*" = ["E501", "SIM114", "UP022"]
