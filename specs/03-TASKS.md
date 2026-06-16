@@ -37,7 +37,8 @@ empty checklist.
 - [x] **P0.T2** — Create directory layout: `src/hc/{queue,executor,validator,
       cli,reporter,models,config}/__init__.py`, `tests/`, `modules/`, `runs/`.
 - [x] **P0.T3** — Multi-stage `Dockerfile` (base, producer, worker, reaper,
-      cli targets). Pin Terraform binary version + SHA256.
+      cli targets). Pin Terraform binary version + SHA256 (including provider
+      mirror stage).
 - [x] **P0.T4** — `docker-compose.yml` with `redis`, `postgres`, `producer`,
       `worker`, `reaper`, `cli`, `migrate`. Healthchecks on redis and postgres.
 - [x] **P0.T5** — `Makefile` with `make fmt`, `make lint`, `make test`,
@@ -61,6 +62,12 @@ empty checklist.
 > engine pipe). The image build runs in CI on GitHub's runners (`docker-build`
 > job in `.github/workflows/ci.yml`). The Terraform pin uses the official
 > SHA256 for `terraform_1.9.8_linux_amd64.zip`.
+>
+> Provider-mirror note (Amendment 3): the `terraform providers mirror` build
+> stage (`02-INFRASTRUCTURE.md` §2) is specified but not yet built into the
+> Dockerfile. P0.T3 stays `[x]` for the existing multi-stage build; the mirror
+> stage must be validated by the CI `docker-build` job before it counts as
+> complete.
 
 ### Review gate
 
@@ -148,6 +155,12 @@ capture state and outputs, surface classified errors.
       canned plans; integration test against a Localstack-style stub if
       available, otherwise marker `@pytest.mark.live` skipped by default.
 
+> TemplateRenderer note (Amendment 2): the Template Renderer
+> (`00-ARCHITECTURE.md` §2.5.1) is instantiated in this phase as a **no-op
+> pass-through** (static level) — `checklist.yml` vars flow to the executor
+> unchanged. Interpolation (`${context.*}`) is added in Phase 3 (P3.T2.1);
+> plugin-driven context arrives in Phase 7.
+
 ### DoD
 
 - [~] Each module passes `terraform fmt -check`, `terraform validate`, and
@@ -183,7 +196,15 @@ queue, honoring dependencies.
 - [ ] **P3.T1** — JSON Schema for `checklist.yml`. Validate on load; reject
       with line-pointed errors via `jsonschema`.
 - [ ] **P3.T2** — `ChecklistLoader`: parse YAML, expand `defaults`, normalize
-      IDs (`TC-XXX`), compute `spec_hash` and `task_id` per entry.
+      IDs (`TC-XXX`), compute `spec_hash` and `task_id` per entry, including
+      loading and validating `config/action_registry.yml` and resolving
+      `spec.action` → module from it.
+- [ ] **P3.T2.1** — `TemplateRenderer` interpolation: resolve `${context.*}`
+      references in `TaskSpec.vars` against a context dict built from environment
+      variables + config before plan/apply. Rendering MUST be deterministic for a
+      given (TaskSpec, context) so `spec_hash` stays stable (NFR-009);
+      non-deterministic context (e.g. timestamps) is forbidden. See
+      `00-ARCHITECTURE.md` §2.5.1.
 - [ ] **P3.T3** — `DependencyResolver`: topological sort with cycle detection;
       expose `ready_tasks(completed: set[str]) -> list[TaskSpec]`.
 - [ ] **P3.T4** — `Producer` CLI: `--checklist <path> --run-id <id>
@@ -286,6 +307,12 @@ provisioned via Terraform, validated, and recorded — for one TC.
       timeout. Terminal failures go to an error queue. Every task must acquire
       a resource-group lock before plan/apply/destroy so live jobs cannot race
       each other or exceed quota by creating duplicate resources.
+- [ ] **P5.T10** — Evaluate async validator architecture: assess whether the
+      validator should run as a separate consumer (decoupled from the worker's
+      apply loop) or remain inline. Write a 1-page ADR
+      (`docs/adr/001-async-validator.md`) documenting the decision with
+      tradeoffs. If async is chosen, update `00-ARCHITECTURE.md` §2.6 and §3
+      data flow. If inline is kept, document why and close. (phase: P5)
 
 ### DoD
 

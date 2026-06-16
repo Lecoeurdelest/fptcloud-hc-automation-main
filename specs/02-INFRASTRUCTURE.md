@@ -50,6 +50,28 @@ All Python services share a single multi-stage `Dockerfile` selecting the
 entrypoint via `target=`. Base image: `python:3.11-slim-bookworm`. Terraform
 binary installed via `RUN curl … && unzip …` pinned by SHA256.
 
+The Dockerfile shall include a dedicated build stage that pre-downloads the
+`fpt-corp/fptcloud` provider binary using `terraform providers mirror`. The
+mirrored plugin directory is copied into the worker image at build time and
+exposed via `TF_PLUGIN_CACHE_DIR`. Workers MUST NOT download the provider at
+runtime (`terraform init` uses the local mirror). This eliminates ~30s of
+network latency per task and removes a runtime dependency on
+`registry.terraform.io` availability.
+
+```dockerfile
+# Stage: provider-cache (built once, cached in CI layer)
+FROM hashicorp/terraform:1.9.8 AS tf-cache
+COPY modules/ /tmp/modules/
+RUN terraform providers mirror \
+      -platform=linux_amd64 \
+      /tf-plugins \
+    && du -sh /tf-plugins/*
+
+# Stage: worker (inherits cached provider)
+COPY --from=tf-cache /tf-plugins /usr/share/terraform/plugins
+ENV TF_PLUGIN_CACHE_DIR=/usr/share/terraform/plugins
+```
+
 ## 3. Environment variables
 
 The single source of secrets is the host's environment (or `docker compose`
@@ -153,8 +175,11 @@ runs/<run_id>/<task_id>/           ← generated per task, ephemeral
 └── terraform.tfstate              ← local backend, scoped to this task
 ```
 
-A shared `.terraform.d/plugin-cache` volume is mounted so that the provider
-binary is downloaded once across all tasks.
+Runtime workers MUST use the provider mirror baked into the image at build time
+(`TF_PLUGIN_CACHE_DIR`, see §2): `terraform init` resolves the `fpt-corp/fptcloud`
+provider from that local mirror and performs no registry download. Any provider
+download happens only at Docker image-build time, when the mirror is created or
+refreshed — never during a normal worker run.
 
 ### 6.1 Backend choice
 
@@ -181,13 +206,17 @@ terraform {
 ```
 
 The version constraint is updated only through a PR that bumps it in all
-modules atomically.
+modules atomically. Provider version bumps require a Docker image rebuild to
+refresh the cached mirror (see §2).
 
 ## 7. Network requirements
 
 - The host running `docker compose` must have **outbound HTTPS** to
-  `FPTCLOUD_API_URL` and to the Terraform Registry
-  (`registry.terraform.io`).
+  `FPTCLOUD_API_URL`. Outbound HTTPS to the Terraform Registry
+  (`registry.terraform.io`) and provider GitHub release assets is required
+  **only at image-build time** to create or refresh the provider mirror (§2),
+  not for normal worker runtime — runtime workers resolve the provider from the
+  baked-in mirror.
 - For **in-VM validation**, workers must reach provisioned VMs. Options:
   1. Run the stack on a host inside the tenant's VPC.
   2. Run on the public internet and target VMs with public IPs +

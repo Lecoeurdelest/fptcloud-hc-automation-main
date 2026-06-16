@@ -188,7 +188,10 @@ not yet on 3.12; pin upper bound).
 
 ### C-002 — Terraform provider
 Use `fpt-corp/fptcloud` from the public Terraform Registry. The version is
-pinned in each module's `required_providers` block and bumped only via PR.
+pinned in each module's `required_providers` block and bumped only via PR. The
+pinned version is enforced at runtime by the provider mirror baked into the
+worker image at build time (see `02-INFRASTRUCTURE.md` §2); runtime workers do
+not resolve providers from the registry.
 
 ### C-003 — Terraform CLI
 Terraform `>= 1.6` (so `import` blocks and `removed` blocks are available),
@@ -252,6 +255,23 @@ All rolling-strategy tunables (`INSTANCE_DISK_GB`, `INSTANCE_VCPU`,
 `TARGET_VPCS`, `SUPPORTED_IMAGES`, `UNAVAILABLE_IMAGES`, ACTIVE wait/poll) shall
 live in `health-check.json → constants.ROLLING_INSTANCE_STRATEGY` with same-named
 environment overrides; no tunable shall be hard-coded outside that section.
+
+### C-015 — Verdict durability
+Redis is a transport layer only. The authoritative verdict for any task is the
+latest row in `hc_attempts` (Postgres). If Redis is completely wiped, the system
+shall be resumable from Postgres state alone: the Producer re-reads
+`hc_tasks.state` and re-enqueues only PENDING/FAILED entries. No verdict data
+shall be lost. This makes NFR-004 a hard guarantee and underwrites the
+resumable-runs contract (FR-011).
+
+### C-016 — Checklist authoring complexity
+A QA engineer with no Terraform knowledge shall be able to add a new test case
+to `checklist.yml` by copying an existing entry and changing only:
+`description`, `os`, `cpu`, `ram_gb`, `disk_gb`, `cidr`, or `port` values.
+Module selection shall be inferred from `spec.action` by the ChecklistLoader
+using an action-to-module registry (`config/action_registry.yml`). Dependency
+wiring shall be inferred from resource references, not manually specified
+(except for explicit overrides via `depends_on`).
 
 ## 4. Out of scope (v1)
 
