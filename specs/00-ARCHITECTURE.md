@@ -105,6 +105,50 @@ All `FPTCLOUD_*` env vars (`FPTCLOUD_API_URL`, `FPTCLOUD_REGION`,
 `FPTCLOUD_TENANT_NAME`, `FPTCLOUD_TOKEN`, `VPC_ID`) are injected per
 subprocess — never written to disk.
 
+### 2.5.1 Template Renderer
+
+Sits between the ChecklistLoader and the TerraformExecutor. Resolves
+dynamic values in `TaskSpec.vars` before handing them to Terraform.
+
+Three progressive complexity levels:
+
+1. **Static** (Phase 2): vars from `checklist.yml` passed through
+   unchanged. The renderer is a no-op identity function.
+2. **Interpolated** (Phase 3): `checklist.yml` vars may contain
+   template references (e.g. `${context.vpc_id}`,
+   `${context.latest_image.ubuntu_2204}`). The renderer resolves them
+   against a context dict built from environment variables and config.
+3. **Plugin-driven** (Phase 7): context plugins fetch runtime data
+   (quota headroom, available images, existing resources) from FPT
+   Cloud data sources before rendering. Plugins are registered in
+   `config/context_plugins.yml`.
+
+Data flow:
+
+```
+ChecklistLoader → TaskSpec(raw_vars)
+                      │
+                      ▼
+               TemplateRenderer
+                      │
+          ┌───────────┴───────────┐
+          ▼                       ▼
+    static vars            context plugins
+    (identity)            (HTTP, file, env)
+          │                       │
+          └───────────┬───────────┘
+                      ▼
+               TaskSpec(resolved_vars)
+                      │
+                      ▼
+             TerraformExecutor
+```
+
+The renderer MUST be deterministic for a given (TaskSpec, context)
+tuple — same inputs produce same `resolved_vars` and therefore same
+`spec_hash`. Non-deterministic context (e.g. timestamp) is forbidden
+in vars.
+
 ### 2.6 Validator
 
 Each `TaskSpec` carries an `expected` block. Validators are pluggable:
@@ -136,7 +180,9 @@ command `hc dlq replay <entry-id>` reinjects after fix.
 ### 2.9 Result Store
 
 Postgres table (see schema in `02-INFRASTRUCTURE.md` §5). One row per task
-attempt. The latest attempt per `task_id` is the verdict.
+attempt. The latest attempt per `task_id` is the verdict. Redis is transport
+only; Postgres is authoritative and the system is resumable from it alone — see
+C-015 for the durability contract.
 
 ### 2.10 Reporter
 
@@ -160,6 +206,9 @@ XADD hc:tasks  ────────►  worker XREADGROUP
                                 │
                                 ▼
                         lock:<resource_key>
+                                │
+                                ▼
+                        template render (resolve vars)
                                 │
                                 ▼
                         terraform init/plan/apply
@@ -259,7 +308,6 @@ test_cases:
     description: "Khởi tạo network cho VM"
     spec:
       action: create_subnet
-      module: subnet
       vars:
         cidr: 172.26.221.0/24
     expected:
@@ -271,7 +319,6 @@ test_cases:
     description: "VM Windows Server 2012, 2vCPU/2GB/40GB"
     spec:
       action: create_vm
-      module: vm
       vars: { os: windows-2012, cpu: 2, ram_gb: 2, disk_gb: 40 }
     expected:
       - type: tf_state
@@ -283,9 +330,82 @@ test_cases:
   # ... TC-003 … TC-024 (full QA list)
 ```
 
+`spec.module` is **not** authored in the checklist. The ChecklistLoader infers
+the Terraform module from `spec.action` via the action registry
+(`config/action_registry.yml`, see §5.1) at load time, and infers dependency
+wiring from resource references unless an explicit `depends_on` override is
+given (C-016).
+
 The runtime `TaskSpec` (post-validation) adds `task_id`, `attempt`,
 `enqueued_at`, `parent_task_id` (for dependencies), and a normalized
 `retry_policy`.
+
+### 5.1 Action Registry
+
+`config/action_registry.yml` maps action names to Terraform modules and default
+validators. This file is the ONLY place where new resource types are wired into
+the system — no Python code changes required.
+
+```yaml
+actions:
+  create_subnet:
+    module: subnet
+    validators: [tf_state]
+    resource_key_template: "subnet:${vars.cidr}"
+
+  create_vm:
+    module: vm
+    validators: [tf_state, in_vm]
+    resource_key_template: "vm:${vars.os}-${vars.cpu}cpu"
+    default_depends_on_actions: [create_subnet]
+
+  resize_vm:
+    module: vm
+    validators: [tf_state, in_vm]
+    resource_key_template: "vm:${parent.resource_key}"
+    requires_existing: true
+
+  attach_disk:
+    module: disk
+    validators: [tf_state, in_vm]
+    resource_key_template: "disk:${vars.size_gb}gb-${parent.resource_key}"
+    default_depends_on_actions: [create_vm]
+
+  create_security_group:
+    module: security_group
+    validators: [tf_state, api_probe]
+    resource_key_template: "sg:${vars.name}"
+
+  assign_floating_ip:
+    module: floating_ip
+    validators: [tf_state, api_probe]
+    resource_key_template: "fip:${parent.resource_key}"
+    default_depends_on_actions: [create_vm, create_security_group]
+
+  create_bucket:
+    module: object_storage
+    validators: [tf_state]
+    resource_key_template: "bucket:${vars.name}"
+
+  # Gap items — no module yet, direct API fallback
+  create_snapshot:
+    module: null
+    executor: api_fallback
+    validators: [api_probe]
+    gap: provider_resource_missing
+
+  schedule_vm_power:
+    module: null
+    executor: api_fallback
+    validators: [api_probe]
+    gap: provider_resource_missing
+```
+
+Extension protocol: to support a new FPT Cloud resource type, an operator drops
+a Terraform module into `modules/<name>/`, adds an entry to
+`action_registry.yml`, and adds test cases to `checklist.yml`. Zero Python code
+changes. This mirrors the "Sovereign" control-plane pattern: config-driven,
+code-stable.
 
 ## 6. Concurrency model
 

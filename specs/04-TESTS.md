@@ -138,6 +138,10 @@ Run with: `make test-unit` (pytest marker: `@pytest.mark.unit`)
 - [ ] **T-0313** — Producer dry-run mode enqueues 0 tasks, prints plan (phase: P3.T4)
 - [ ] **T-0314** — Producer resumability: re-submit same `run_id` → 0 new enqueues (phase: P3.T6)
 - [ ] **T-0315** — Gap items enqueued with `expected.type: manual` (phase: P3.T7)
+- [ ] **T-0316** — Action registry maps `create_vm` to module `vm` (phase: P3.T2)
+- [ ] **T-0317** — Action registry rejects unknown action name (phase: P3.T2)
+- [ ] **T-0318** — Action registry infers `default_depends_on_actions` correctly (phase: P3.T3)
+- [ ] **T-0319** — Gap action with `module: null` routes to `api_fallback` executor (phase: P7.T1)
 
 ### Validators (`src/hc/validator/`) — target ≥ 80%
 
@@ -226,6 +230,8 @@ Run with: `make test-integration` (pytest marker: `@pytest.mark.integration`)
 - [ ] **T-1208** — Live runner prevents resource conflicts with per-group locks and releases locks after destroy (phase: P5.T9)
 - [ ] **T-1209** — Live runner disables quota prechecks, classifies provider quota exceeded, retains resources, stops without attempting later images, and reports `user_action_required=True` (phase: P5.T9)
 - [ ] **T-1210** — Live runner selects `Premium-SSD` by exact name, passes provider-facing `id` as VM `storage_policy_id`, logs `id_db` only for debugging, and does not select `Premium-SSD-4000` by partial match (phase: P5.T9)
+- [ ] **T-1211** — If async validator: provisional PASS emitted by worker, final PASS confirmed by validator consumer (phase: P5.T10)
+- [ ] **T-1212** — If async validator: validator timeout → verdict becomes INCONCLUSIVE, not stuck (phase: P5.T10)
 
 ### Database integration
 
