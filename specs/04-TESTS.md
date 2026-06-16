@@ -142,6 +142,8 @@ Run with: `make test-unit` (pytest marker: `@pytest.mark.unit`)
 - [ ] **T-0317** — Action registry rejects unknown action name (phase: P3.T2)
 - [ ] **T-0318** — Action registry infers `default_depends_on_actions` correctly (phase: P3.T3)
 - [ ] **T-0319** — Gap action with `module: null` routes to `api_fallback` executor (phase: P7.T1)
+- [ ] **T-0320** — `TemplateRenderer` resolves `${context.*}` refs; identical (TaskSpec, context) yields identical `resolved_vars` and `spec_hash` (phase: P3.T2.1)
+- [ ] **T-0321** — `TemplateRenderer` rejects non-deterministic context (e.g. timestamp) in vars (phase: P3.T2.1)
 
 ### Validators (`src/hc/validator/`) — target ≥ 80%
 
@@ -232,6 +234,7 @@ Run with: `make test-integration` (pytest marker: `@pytest.mark.integration`)
 - [ ] **T-1210** — Live runner selects `Premium-SSD` by exact name, passes provider-facing `id` as VM `storage_policy_id`, logs `id_db` only for debugging, and does not select `Premium-SSD-4000` by partial match (phase: P5.T9)
 - [ ] **T-1211** — If async validator: provisional PASS emitted by worker, final PASS confirmed by validator consumer (phase: P5.T10)
 - [ ] **T-1212** — If async validator: validator timeout → verdict becomes INCONCLUSIVE, not stuck (phase: P5.T10)
+- [ ] **T-1213** — After a Redis wipe, Producer re-reads `hc_tasks.state` and re-enqueues only PENDING/FAILED entries; no verdict lost (C-015) (phase: P3.T6)
 
 ### Database integration
 
