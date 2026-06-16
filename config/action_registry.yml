@@ -1,0 +1,95 @@
+# Action Registry — single wiring point for action → Terraform module, validators,
+# resource-key templates, and default dependency inference (C-016, §5.1).
+#
+# Extension protocol: to support a new FPT Cloud resource type, drop a Terraform
+# module into modules/<name>/, add an entry here, and add test cases to checklist.yml.
+# Zero Python code changes are required (§5.1).
+#
+# Gap items use module: null and executor: api_fallback until the provider exposes
+# the resource. They are routed to the direct-API fallback introduced in Phase 7 (P7.T1).
+
+actions:
+  create_subnet:
+    module: subnet
+    validators: [tf_state]
+    resource_key_template: "subnet:${vars.cidr}"
+    default_depends_on_actions: []
+
+  create_vm:
+    module: vm
+    validators: [tf_state, in_vm]
+    resource_key_template: "vm:${vars.os}-${vars.cpu}cpu"
+    default_depends_on_actions: [create_subnet]
+
+  resize_vm:
+    module: vm
+    validators: [tf_state, in_vm]
+    resource_key_template: "vm:${parent.resource_key}"
+    requires_existing: true
+    default_depends_on_actions: [create_vm]
+
+  attach_disk:
+    module: disk
+    validators: [tf_state, in_vm]
+    resource_key_template: "disk:${vars.size_gb}gb-${parent.resource_key}"
+    default_depends_on_actions: [create_vm]
+
+  create_security_group:
+    module: security_group
+    validators: [tf_state, api_probe]
+    resource_key_template: "sg:${vars.name}"
+    default_depends_on_actions: []
+
+  assign_floating_ip:
+    module: floating_ip
+    validators: [tf_state, api_probe]
+    resource_key_template: "fip:${parent.resource_key}"
+    default_depends_on_actions: [create_vm, create_security_group]
+
+  create_bucket:
+    module: object_storage
+    validators: [tf_state]
+    resource_key_template: "bucket:${vars.name}"
+    default_depends_on_actions: []
+
+  # Gap items — provider does not expose these resources yet (P7.T1).
+  # module: null routes to api_fallback executor once Phase 7 wires it.
+  create_snapshot:
+    module: null
+    executor: api_fallback
+    validators: [api_probe]
+    resource_key_template: "snapshot:${parent.resource_key}"
+    gap: provider_resource_missing
+    default_depends_on_actions: [create_vm]
+
+  schedule_vm_power:
+    module: null
+    executor: api_fallback
+    validators: [api_probe]
+    resource_key_template: "schedule:${parent.resource_key}"
+    gap: provider_resource_missing
+    default_depends_on_actions: [create_vm]
+
+  create_backup:
+    module: null
+    executor: api_fallback
+    validators: [api_probe]
+    resource_key_template: "backup:${parent.resource_key}"
+    gap: provider_resource_missing
+    default_depends_on_actions: [create_vm]
+
+  restore_backup:
+    module: null
+    executor: api_fallback
+    validators: [api_probe]
+    resource_key_template: "restore:${parent.resource_key}"
+    gap: provider_resource_missing
+    default_depends_on_actions: [create_backup]
+
+  connect_s3:
+    module: null
+    executor: api_fallback
+    validators: [api_probe]
+    resource_key_template: "s3:${vars.bucket_name}"
+    gap: provider_resource_missing
+    default_depends_on_actions: [create_bucket]

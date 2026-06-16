@@ -1,0 +1,477 @@
+# FPT Cloud QA Checklist — TC-001 through TC-028
+#
+# TC numbering follows specs/04-TESTS.md §E2E (authoritative source).
+# Note: specs/03-TASKS.md gap table names TC-017 = "Create backup" which
+# conflicts with the E2E table (TC-017 = Assign public IP, networking).
+# This discrepancy is flagged in the Phase 3 implementation report; the E2E
+# table numbering is used here as the more complete and internally consistent
+# source.
+#
+# Gap items (no provider resource): TC-014, TC-015, TC-016, TC-022, TC-023,
+# TC-026. These use executor: api_fallback (Phase 7) and have expected.type:
+# manual as a temporary fallback (P3.T7, T-0315).
+
+run_id: smoke-run
+tenant_id: tenant-placeholder
+
+defaults:
+  retry_policy:
+    max_attempts: 3
+    base_seconds: 30
+    max_seconds: 600
+    jitter: 0.2
+
+test_cases:
+
+  # ── Compute ─────────────────────────────────────────────────────────────
+  - id: TC-001
+    category: compute
+    description: "Khởi tạo network cho VM (Create subnet 172.26.221.0/24)"
+    spec:
+      action: create_subnet
+      vars:
+        cidr: 172.26.221.0/24
+        name: hc-subnet-001
+    expected:
+      - type: tf_state
+        path: "fptcloud_subnet.this.cidr"
+        equals: "172.26.221.0/24"
+
+  - id: TC-002
+    category: compute
+    description: "Tạo VM Windows Server 2012, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: windows-2012
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-003
+    category: compute
+    description: "Tạo VM Windows Server 2016, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: windows-2016
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-004
+    category: compute
+    description: "Tạo VM Windows Server 2019, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: windows-2019
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-005
+    category: compute
+    description: "Tạo VM Windows Server 2022, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: windows-2022
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-006
+    category: compute
+    description: "Tạo VM Ubuntu 16.04, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: ubuntu-16-04
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-007
+    category: compute
+    description: "Tạo VM Ubuntu 18.04, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: ubuntu-18-04
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-008
+    category: compute
+    description: "Tạo VM Ubuntu 20.04, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: ubuntu-20-04
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-009
+    category: compute
+    description: "Tạo VM Ubuntu 22.04, 2vCPU/2GB/40GB"
+    spec:
+      action: create_vm
+      vars:
+        os: ubuntu-22-04
+        cpu: 2
+        ram_gb: 2
+        disk_gb: 40
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.power_state"
+        equals: "running"
+      - type: in_vm
+        probe: "echo ok"
+        contains: "ok"
+
+  - id: TC-010
+    category: compute
+    description: "Thay đổi cấu hình VM lên 4vCPU/4GB"
+    depends_on: [TC-002]
+    spec:
+      action: resize_vm
+      vars:
+        cpu: 4
+        ram_gb: 4
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.vcpu"
+        equals: "4"
+      - type: in_vm
+        probe: "nproc"
+        contains: "4"
+
+  - id: TC-011
+    category: compute
+    description: "Hot-add ổ đĩa OS từ 40GB lên 80GB"
+    depends_on: [TC-002]
+    spec:
+      action: attach_disk
+      vars:
+        size_gb: 80
+        disk_type: os
+    expected:
+      - type: tf_state
+        path: "fptcloud_instance.this.root_disk_size"
+        equals: "80"
+      - type: in_vm
+        probe: "lsblk -b -o SIZE -d -n /dev/vda"
+        contains: "85899345920"
+
+  - id: TC-012
+    category: compute
+    description: "Attach ổ đĩa data 40GB"
+    depends_on: [TC-002]
+    spec:
+      action: attach_disk
+      vars:
+        size_gb: 40
+        disk_type: data
+    expected:
+      - type: tf_state
+        path: "fptcloud_storage.this.size"
+        equals: "40"
+      - type: in_vm
+        probe: "lsblk -d -n -o NAME,SIZE | grep -v vda"
+        contains: "40G"
+
+  - id: TC-013
+    category: compute
+    description: "Xóa VM, kiểm tra ổ đĩa data vẫn tồn tại"
+    depends_on: [TC-012]
+    spec:
+      action: attach_disk
+      vars:
+        size_gb: 40
+        disk_type: data
+        verify_survives_vm_delete: true
+    expected:
+      - type: tf_state
+        path: "fptcloud_storage.this.id"
+        present: true
+
+  # TC-014: Gap item — VM power schedule not exposed by provider
+  - id: TC-014
+    category: compute
+    description: "Đặt lịch bật/tắt VM (gap — provider resource missing)"
+    gap: provider_resource_missing
+    depends_on: [TC-002]
+    spec:
+      action: schedule_vm_power
+      gap: provider_resource_missing
+    expected:
+      - type: manual
+        note: "VM power schedule not yet exposed by fpt-corp/fptcloud provider (P7.T1)"
+
+  # TC-015: Gap item — Create snapshot
+  - id: TC-015
+    category: compute
+    description: "Tạo snapshot VM (gap — provider resource missing)"
+    gap: provider_resource_missing
+    depends_on: [TC-002]
+    spec:
+      action: create_snapshot
+      gap: provider_resource_missing
+    expected:
+      - type: manual
+        note: "Snapshot not yet exposed by fpt-corp/fptcloud provider (P7.T1)"
+
+  # TC-016: Gap item — Revert snapshot
+  - id: TC-016
+    category: compute
+    description: "Khôi phục snapshot VM (gap — provider resource missing)"
+    gap: provider_resource_missing
+    depends_on: [TC-015]
+    spec:
+      action: create_snapshot
+      gap: provider_resource_missing
+    expected:
+      - type: manual
+        note: "Snapshot revert not yet exposed by fpt-corp/fptcloud provider (P7.T1)"
+
+  # ── Networking ───────────────────────────────────────────────────────────
+  - id: TC-017
+    category: networking
+    description: "Gán IP public (floating IP) cho VM"
+    depends_on: [TC-002, TC-018]
+    spec:
+      action: assign_floating_ip
+      vars:
+        name: hc-fip-001
+    expected:
+      - type: tf_state
+        path: "fptcloud_floating_ip.this.ip_address"
+        present: true
+      - type: api_probe
+        url: "${context.fip_address}"
+        status_code: 200
+
+  - id: TC-018
+    category: networking
+    description: "Tạo Security Group với rule inbound RDP+SSH"
+    spec:
+      action: create_security_group
+      vars:
+        name: hc-sg-rdp-ssh
+        rules:
+          - direction: inbound
+            protocol: tcp
+            port: 3389
+          - direction: inbound
+            protocol: tcp
+            port: 22
+    expected:
+      - type: tf_state
+        path: "fptcloud_security_group.this.name"
+        equals: "hc-sg-rdp-ssh"
+      - type: api_probe
+        check: port_open
+        port: 22
+
+  - id: TC-019
+    category: networking
+    description: "Security Group rule outbound port 80, 443"
+    depends_on: [TC-018]
+    spec:
+      action: create_security_group
+      vars:
+        name: hc-sg-outbound
+        rules:
+          - direction: outbound
+            protocol: tcp
+            port: 80
+          - direction: outbound
+            protocol: tcp
+            port: 443
+    expected:
+      - type: tf_state
+        path: "fptcloud_security_group.this.name"
+        equals: "hc-sg-outbound"
+      - type: in_vm
+        probe: "curl -s -o /dev/null -w '%{http_code}' https://example.com"
+        contains: "200"
+
+  - id: TC-020
+    category: networking
+    description: "Tạo thêm subnet 10.136.10.0/24"
+    spec:
+      action: create_subnet
+      vars:
+        cidr: 10.136.10.0/24
+        name: hc-subnet-002
+    expected:
+      - type: tf_state
+        path: "fptcloud_subnet.this.cidr"
+        equals: "10.136.10.0/24"
+
+  - id: TC-021
+    category: networking
+    description: "Gắn NIC từ subnet mới vào VM"
+    depends_on: [TC-002, TC-020]
+    spec:
+      action: assign_floating_ip
+      vars:
+        name: hc-nic-001
+        subnet_ref: TC-020
+    expected:
+      - type: tf_state
+        path: "fptcloud_floating_ip.this.id"
+        present: true
+      - type: in_vm
+        probe: "ip addr show | grep -c 'inet '"
+        contains: "2"
+
+  # ── Backup & Recovery ────────────────────────────────────────────────────
+  # TC-022: Gap item — Create backup
+  - id: TC-022
+    category: backup
+    description: "Tạo backup VM (gap — provider resource missing)"
+    gap: provider_resource_missing
+    depends_on: [TC-002]
+    spec:
+      action: create_backup
+      gap: provider_resource_missing
+    expected:
+      - type: manual
+        note: "Backup not yet exposed by fpt-corp/fptcloud provider (P7.T1)"
+
+  # TC-023: Gap item — Restore from backup
+  - id: TC-023
+    category: backup
+    description: "Khôi phục VM từ backup (gap — provider resource missing)"
+    gap: provider_resource_missing
+    depends_on: [TC-022]
+    spec:
+      action: restore_backup
+      gap: provider_resource_missing
+    expected:
+      - type: manual
+        note: "Backup restore not yet exposed by fpt-corp/fptcloud provider (P7.T1)"
+
+  # ── Object Storage ───────────────────────────────────────────────────────
+  - id: TC-024
+    category: storage
+    description: "Tạo bucket object storage"
+    spec:
+      action: create_bucket
+      vars:
+        name: hc-bucket-001
+    expected:
+      - type: tf_state
+        path: "fptcloud_object_storage_bucket.this.name"
+        equals: "hc-bucket-001"
+
+  - id: TC-025
+    category: storage
+    description: "Upload file vào bucket và kiểm tra có thể mở"
+    depends_on: [TC-024]
+    spec:
+      action: create_bucket
+      vars:
+        name: hc-bucket-001
+        upload_file: testfile.txt
+    expected:
+      - type: api_probe
+        check: object_exists
+        bucket: hc-bucket-001
+        key: testfile.txt
+
+  # TC-026: Gap item — Connect via S3 endpoint
+  - id: TC-026
+    category: storage
+    description: "Kết nối bucket qua S3 endpoint (gap — client-side, not provider)"
+    gap: provider_resource_missing
+    depends_on: [TC-024]
+    spec:
+      action: connect_s3
+      gap: provider_resource_missing
+      vars:
+        bucket_name: hc-bucket-001
+    expected:
+      - type: manual
+        note: "S3 endpoint connectivity is client-side; no Terraform resource available (P7.T1)"
+
+  - id: TC-027
+    category: storage
+    description: "Xóa file khỏi bucket"
+    depends_on: [TC-025]
+    spec:
+      action: create_bucket
+      vars:
+        name: hc-bucket-001
+        delete_file: testfile.txt
+    expected:
+      - type: api_probe
+        check: object_absent
+        bucket: hc-bucket-001
+        key: testfile.txt
+
+  - id: TC-028
+    category: storage
+    description: "Xóa bucket object storage"
+    depends_on: [TC-027]
+    spec:
+      action: create_bucket
+      vars:
+        name: hc-bucket-001
+    expected:
+      - type: tf_state
+        path: "fptcloud_object_storage_bucket.this.id"
+        present: false

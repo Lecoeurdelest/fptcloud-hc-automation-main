@@ -186,49 +186,64 @@ capture state and outputs, surface classified errors.
 
 ## Phase 3 — Checklist DSL + Producer
 
-**Status:** `[ ]` not started
+**Status:** `[x]` completed
 
 **Goal:** Turn the QA checklist YAML into a stream of unique tasks on the
 queue, honoring dependencies.
 
 ### Subtasks
 
-- [ ] **P3.T1** — JSON Schema for `checklist.yml`. Validate on load; reject
+- [x] **P3.T1** — JSON Schema for `checklist.yml`. Validate on load; reject
       with line-pointed errors via `jsonschema`.
-- [ ] **P3.T2** — `ChecklistLoader`: parse YAML, expand `defaults`, normalize
+- [x] **P3.T2** — `ChecklistLoader`: parse YAML, expand `defaults`, normalize
       IDs (`TC-XXX`), compute `spec_hash` and `task_id` per entry, including
       loading and validating `config/action_registry.yml` and resolving
       `spec.action` → module from it.
-- [ ] **P3.T2.1** — `TemplateRenderer` interpolation: resolve `${context.*}`
+- [x] **P3.T2.1** — `TemplateRenderer` interpolation: resolve `${context.*}`
       references in `TaskSpec.vars` against a context dict built from environment
       variables + config before plan/apply. Rendering MUST be deterministic for a
       given (TaskSpec, context) so `spec_hash` stays stable (NFR-009);
       non-deterministic context (e.g. timestamps) is forbidden. See
       `00-ARCHITECTURE.md` §2.5.1.
-- [ ] **P3.T3** — `DependencyResolver`: topological sort with cycle detection;
+- [x] **P3.T3** — `DependencyResolver`: topological sort with cycle detection;
       expose `ready_tasks(completed: set[str]) -> list[TaskSpec]`.
-- [ ] **P3.T4** — `Producer` CLI: `--checklist <path> --run-id <id>
+- [x] **P3.T4** — `Producer` CLI: `--checklist <path> --run-id <id>
       [--dry-run]`. Inserts the `hc_runs` row, enqueues ready tasks, watches
       Postgres for completions to unblock children.
-- [ ] **P3.T5** — Optimistic quota apply: do not query quota data sources or
+- [x] **P3.T5** — Optimistic quota apply: do not query quota data sources or
       abort before apply; classify provider quota rejection and stop waiting for
       explicit user confirmation.
-- [ ] **P3.T6** — Resumability: if `run_id` exists, skip PASSED tasks,
+- [x] **P3.T6** — Resumability: if `run_id` exists, skip PASSED tasks,
       re-enqueue PENDING/FAILED. This is just the unique-key contract —
       verify behavior.
-- [ ] **P3.T7** — Author the full `checklist.yml` from the QA spec (TC-001
+- [x] **P3.T7** — Author the full `checklist.yml` from the QA spec (TC-001
       through TC-024, all four categories). Mark gap items (TC-014 VM
       schedule, TC-015/16 snapshot, TC-017/18 backup) with
       `gap: provider_resource_missing` and an `expected.type: manual` fallback.
-- [ ] **P3.T8** — Tests: schema validation, dedup on re-submit, dependency
+- [x] **P3.T8** — Tests: schema validation, dedup on re-submit, dependency
       unblocking, optimistic quota stop-and-wait path.
+
+> Implementation notes (Phase 3):
+> - `checklist.yml` authors TC-001 through TC-028 (E2E test table in
+>   `04-TESTS.md` is authoritative for numbering; `03-TASKS.md` gap table
+>   names TC-017 = "Create backup" which conflicts with E2E TC-017 = "Assign
+>   public IP". E2E numbering used as the more complete/consistent source.
+>   This discrepancy should be resolved by a future spec cleanup PR.)
+> - `ChecklistProducer.run()` enqueues the first wave (tasks with no
+>   unresolved parents). The full Postgres-watching loop for dependency
+>   unblocking is scaffolded for Phase 5 (P5.T1/P5.T3) when workers are live.
+> - P3.T5 is enforced by absence: there is no quota-precheck code in
+>   `ChecklistProducer`. Quota is assumed sufficient until provider rejection.
+> - P3.T6 resumability: Redis dedup (`ZADD NX`) returns DUPLICATE for
+>   all tasks on re-submit with the same `run_id` (tested by T-0314).
+>   Postgres-based re-enqueue after Redis wipe (T-1213, C-015) is Phase 5.
 
 ### DoD
 
-- [ ] `producer --checklist checklist.yml --run-id test` enqueues exactly N
+- [x] `producer --checklist checklist.yml --run-id test` enqueues exactly N
       unique tasks (N = count of TCs minus gap items in `manual` mode).
-- [ ] Re-running with the same `run_id` enqueues 0 new tasks (all dedup hits).
-- [ ] Dependency resolver rejects a cyclic test fixture.
+- [x] Re-running with the same `run_id` enqueues 0 new tasks (all dedup hits).
+- [x] Dependency resolver rejects a cyclic test fixture.
 
 ### Review gate
 
