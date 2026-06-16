@@ -136,5 +136,55 @@ def health_checks_create(
     click.echo(json.dumps(result, indent=2))
 
 
+@cli.group("producer")
+def producer() -> None:
+    """Checklist-based job producer commands (Phase 3)."""
+
+
+@producer.command("run")
+@click.option(
+    "--checklist",
+    "checklist_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to checklist.yml.",
+)
+@click.option("--run-id", required=True, help="Run identifier (overrides checklist run_id).")
+@click.option("--dry-run", is_flag=True, default=False, help="Print plan without enqueuing.")
+@click.option(
+    "--registry",
+    "registry_path",
+    default="config/action_registry.yml",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="Path to action_registry.yml.",
+)
+def producer_run(
+    checklist_path: str,
+    run_id: str,
+    dry_run: bool,
+    registry_path: str,
+) -> None:
+    """Load checklist.yml and enqueue the first wave of ready tasks."""
+    from pathlib import Path
+
+    from hc.checklist.loader import ActionRegistry  # noqa: PLC0415
+    from hc.checklist.producer import ChecklistProducer  # noqa: PLC0415
+
+    try:
+        registry = ActionRegistry(Path(registry_path))
+        prod = ChecklistProducer(registry=registry, queue=_queue())
+        result = prod.run(
+            checklist_path=Path(checklist_path),
+            run_id=run_id,
+            dry_run=dry_run,
+        )
+    except Exception as exc:  # noqa: BLE001
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    click.echo(json.dumps(result.as_dict(), indent=2))
+
+
 if __name__ == "__main__":
     cli()
