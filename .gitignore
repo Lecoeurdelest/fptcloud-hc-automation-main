@@ -23,3 +23,8 @@ terraform.tfvars.json
 
 # Private keys
 *.pem
+
+# Runtime artifacts
+runs/
+log.html
+log.json
