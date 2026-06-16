@@ -171,7 +171,7 @@ modules/                           ← versioned, hand-written modules
 runs/<run_id>/<task_id>/           ← generated per task, ephemeral
 ├── main.tf                        ← module call only
 ├── terraform.tfvars.json
-├── .terraform/                    ← provider cache (shared via volume)
+├── .terraform/                    ← provider resolved from baked mirror (TF_PLUGIN_CACHE_DIR)
 └── terraform.tfstate              ← local backend, scoped to this task
 ```
 
