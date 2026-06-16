@@ -20,3 +20,6 @@ build/
 terraform.tfvars
 terraform.tfvars.json
 .terraform.lock.hcl
+
+# Private keys
+*.pem
