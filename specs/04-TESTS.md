@@ -199,6 +199,12 @@ Run with: `make test-unit` (pytest marker: `@pytest.mark.unit`)
 - [ ] **T-0709** — `cli wait` exits 1 when any FAIL (phase: P6.T6)
 - [ ] **T-0710** — `cli wait` exits 1 on timeout (phase: P6.T6)
 - [ ] **T-0711** — `cli teardown` destroys in reverse dependency order (phase: P7)
+- [x] **T-0712** — `hc live run --help` prints without import errors (phase: P4.5.T3)
+- [x] **T-0713** — `hc live view --help` prints without import errors (phase: P4.5.T3)
+- [x] **T-0714** — `hc live stages --help` prints without import errors (phase: P4.5.T3)
+- [x] **T-0715** — `hc doctor --help` prints without import errors (phase: P4.5.T4)
+- [x] **T-0716** — producer dry-run loads `checklist.yml` without cloud mutation (phase: P4.5.T5)
+- [x] **T-0717** — package metadata exposes both `hc` and `fptcloud-hc` scripts (phase: P4.5.T2)
 
 ### Config (`src/hc/config/`) — target ≥ 90%
 

@@ -16,7 +16,8 @@ import sys
 from pathlib import Path
 
 # Make the package's dependencies importable regardless of how it is loaded:
-#   - diagnose_health_inputs lives under scripts/
+#   - diagnose_health_inputs lives under scripts/ in source checkouts and is
+#     packaged as a top-level helper in built wheels.
 #   - hc.inventory.fptcloud_inventory lives under src/
 _ROOT = Path(__file__).resolve().parents[2]
 for _path in (str(_ROOT / "src"), str(_ROOT / "scripts")):

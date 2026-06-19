@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from html import escape
 from importlib import resources
 from pathlib import Path
 from string import Template
+
+from hc.compat import UTC
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timezone
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -14,4 +16,10 @@ except ImportError:
             return str(self.value)
 
 
-__all__ = ["StrEnum"]
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc
+
+
+__all__ = ["StrEnum", "UTC"]

@@ -313,6 +313,48 @@ queue, honoring dependencies.
 
 ---
 
+## Phase 4.5 — Installable CLI app
+
+**Status:** `[x]` completed
+
+**Goal:** Operators can install the project and run health-check commands
+without remembering `PYTHONPATH` or direct script paths.
+
+### Subtasks
+
+- [x] **P4.5.T1** — Package both `hc` and `healthcheck` Python packages in the
+      wheel so the live runner works after `pip install`.
+- [x] **P4.5.T2** — Add console scripts: `hc` as the primary CLI and
+      `fptcloud-hc` as a descriptive alias.
+- [x] **P4.5.T3** — Add live-runner commands under `hc live`: `run`, `view`,
+      and `stages`.
+- [x] **P4.5.T4** — Add `hc doctor` for local readiness checks without
+      creating cloud resources.
+- [x] **P4.5.T5** — Keep `scripts/run_health_checks.py` as a compatibility
+      facade while documenting the installable CLI as the preferred path.
+- [x] **P4.5.T6** — Document editable install, wheel build, wheel install, and
+      smoke commands in `README.md`.
+
+### DoD
+
+- [x] `python -m hc.cli.main --help` prints without requiring Postgres or live
+      cloud credentials.
+- [x] `python -m hc.cli.main live run --help`, `live view --help`,
+      `live stages --help`, and `doctor --help` all work.
+- [x] `python -m hc.cli.main producer run --checklist checklist.yml --run-id
+      smoke-local --dry-run` loads the checklist and prints the first runnable
+      wave without creating cloud resources.
+- [x] Wheel metadata includes `hc`, `fptcloud-hc`, `src/hc`, `src/healthcheck`,
+      `specs/`, `modules/`, `healthcheck.toml`, and the packaged diagnostics
+      helper required by the live runner.
+
+### Review gate
+
+- [ ] Evaluator installs from a built wheel in a fresh virtual environment and
+      confirms `hc doctor`, `hc live stages`, and `hc live view <log.json>` run.
+
+---
+
 ## Phase 5 — Worker integration
 
 **Status:** `[ ]` not started

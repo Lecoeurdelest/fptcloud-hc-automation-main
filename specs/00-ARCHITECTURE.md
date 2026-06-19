@@ -225,6 +225,43 @@ Reads result store, renders:
 - `report.html` — same content + collapsible terraform/log panes.
 - `report.json` — machine-readable for downstream pipelines.
 
+### 2.11 Installable CLI App
+
+The repository exposes an installable console application through package
+metadata:
+
+- `hc` — primary operator CLI.
+- `fptcloud-hc` — descriptive alias for the same command group.
+
+The CLI has two operator surfaces:
+
+- Queue/checklist commands: `hc producer`, `hc queue`, `hc dlq`, and `hc db`.
+- Live-runner commands: `hc live run`, `hc live view`, `hc live stages`, plus
+  `hc doctor` for local readiness checks without cloud mutation.
+
+Packaging MUST include both source packages:
+
+- `src/hc` for the queue/checklist framework and CLI.
+- `src/healthcheck` for the live spec-gated runner.
+- `specs/` and `modules/` runtime assets so installed live commands can find
+  the stage catalog and Terraform modules.
+
+The historical `scripts/run_health_checks.py` entrypoint remains as a
+compatibility facade, but installed usage should prefer:
+
+```bash
+hc live run --stage object-storage.bucket
+hc live view runs/<run_id>/log.json --filter summary
+hc doctor
+```
+
+Build artifacts MUST include the diagnostic helper used by the live runner so
+the installed CLI does not rely on a repository-local `PYTHONPATH=scripts`.
+At runtime, `HC_PROJECT_ROOT` may point the CLI at a source checkout or
+operator-managed config/modules directory; otherwise the CLI prefers the current
+working directory when it contains `specs/health-check.json` and `modules/`,
+then falls back to packaged assets.
+
 ## 3. Data flow (one task lifecycle)
 
 ```

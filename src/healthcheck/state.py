@@ -25,7 +25,21 @@ from typing import Any
 
 from healthcheck.models import QueueItem
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def project_root() -> Path:
+    configured = os.environ.get("HC_PROJECT_ROOT", "").strip()
+    if configured:
+        return Path(configured).resolve()
+    cwd = Path.cwd().resolve()
+    if (cwd / "specs" / "health-check.json").exists() and (cwd / "modules").exists():
+        return cwd
+    package_root = Path(__file__).resolve().parents[1]
+    if (package_root / "specs" / "health-check.json").exists():
+        return package_root
+    return Path(__file__).resolve().parents[2]
+
+
+ROOT = project_root()
 RUN_ID = time.strftime("hc-%Y%m%d-%H%M%S")
 RUN_STARTED_AT = time.monotonic()
 RUN_ROOT = ROOT / "runs" / RUN_ID

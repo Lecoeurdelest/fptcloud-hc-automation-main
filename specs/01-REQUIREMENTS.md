@@ -134,6 +134,14 @@ Requested behavior that is not implemented shall fail or skip before Terraform
 apply and must be reported in `log.json`/`log.html`; it must not be reported as
 a successful health-check.
 
+### FR-021 - Installable operator CLI
+Operators shall be able to install the project as a Python package and run the
+health-check tooling through console scripts, without setting `PYTHONPATH` or
+calling repository scripts directly. The primary command is `hc`; `fptcloud-hc`
+is an alias. The installed CLI shall expose live-runner commands (`hc live run`,
+`hc live view`, `hc live stages`), queue/checklist commands, and `hc doctor` for
+readiness checks that do not create cloud resources.
+
 ## 2. Non-functional requirements
 
 ### NFR-001 — Throughput
@@ -201,6 +209,14 @@ Runtime phase constraints authored in TOML shall be structured data only:
 `key`, `op`, `value`, and optional `message`. Implementations shall not evaluate
 arbitrary TOML expressions as code. Supported operators are `==`, `!=`, `<`,
 `<=`, `>`, `>=`, `in`, and `not_in`.
+
+### NFR-015 - CLI packaging completeness
+Build artifacts shall include every import required by installed console
+scripts: `src/hc`, `src/healthcheck`, the reporter HTML template, and the
+diagnostics helper used by the live runner. They shall also include `specs/`,
+`modules/`, and default `healthcheck.toml` runtime assets. `hc --help`,
+`hc doctor --help`, and `hc live run --help` must not require Postgres, Redis,
+Terraform, cloud credentials, or a live tenant connection.
 
 ## 3. Constraints
 

@@ -16,6 +16,15 @@ Spec-and-implementation alignment session. Added explicit spec coverage for the
 user-editable TOML runtime config so the live runner obeys the repository rule:
 no spec, no implementation.
 
+### Amendment 7 - Installable CLI app
+- **Files:** [00-ARCHITECTURE.md](00-ARCHITECTURE.md), [01-REQUIREMENTS.md](01-REQUIREMENTS.md), [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md)
+- **Summary:** Added Phase 4.5 for packaging and operator CLI ergonomics.
+  The installable app exposes `hc` and `fptcloud-hc`, adds `hc live run`,
+  `hc live view`, `hc live stages`, and `hc doctor`, and packages both
+  `src/hc`, `src/healthcheck`, `specs/`, `modules/`, `healthcheck.toml`, and
+  the diagnostics helper required by the live runner.
+- **Rationale:** `operator-usability`
+
 ### Amendment 3 — TOML target VPC list
 - **Files:** [01-REQUIREMENTS.md](01-REQUIREMENTS.md), [05-SPEC-GOVERNANCE.md](05-SPEC-GOVERNANCE.md), [06-QUOTA-AWARE-ROLLING-STRATEGY.md](06-QUOTA-AWARE-ROLLING-STRATEGY.md), [health-check.json](health-check.json)
 - **Summary:** Moved the ordered target VPC coverage list to

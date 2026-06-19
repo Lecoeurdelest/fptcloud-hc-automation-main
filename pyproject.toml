@@ -37,12 +37,17 @@ dev = [
 
 [project.scripts]
 hc = "hc.cli.main:cli"
+fptcloud-hc = "hc.cli.main:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/hc"]
+packages = ["src/hc", "src/healthcheck"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/hc/reporter/html_log.html" = "hc/reporter/html_log.html"
+"scripts/diagnose_health_inputs.py" = "diagnose_health_inputs.py"
+"specs" = "specs"
+"modules" = "modules"
+"healthcheck.toml" = "healthcheck.toml"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

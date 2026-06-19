@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
+from pathlib import Path
 
 import click
 import redis
 
 from hc.config.settings import QueueSettings
-from hc.db import migrate
 from hc.producer import DEFAULT_MAX_JOBS, ProducerError, create_health_checks
 from hc.queue.redis_queue import RedisQueue
 
@@ -23,6 +24,118 @@ def _queue() -> RedisQueue:
 @click.group()
 def cli() -> None:
     """FPT Cloud health-check automation CLI."""
+
+
+@cli.command("doctor")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Print machine-readable JSON.")
+def doctor(as_json: bool) -> None:
+    """Check local CLI/runtime readiness without creating cloud resources."""
+    from healthcheck import config, state  # noqa: PLC0415
+    from healthcheck.spec_loader import load_spec  # noqa: PLC0415
+
+    spec_ok = True
+    spec_count = 0
+    spec_error = ""
+    try:
+        spec_count = len(load_spec())
+    except Exception as exc:  # noqa: BLE001
+        spec_ok = False
+        spec_error = str(exc)
+
+    result = {
+        "python": sys.version.split()[0],
+        "terraform": shutil.which("terraform") or "",
+        "spec_path": str(state.SPEC_PATH),
+        "spec_loaded": spec_ok,
+        "spec_stage_count": spec_count,
+        "spec_error": spec_error,
+        "runtime_config": {
+            "path": config.RUNTIME_CONFIG_RESULT.get("path"),
+            "found": config.RUNTIME_CONFIG_RESULT.get("found"),
+            "loaded": config.RUNTIME_CONFIG_RESULT.get("loaded"),
+            "error": config.RUNTIME_CONFIG_RESULT.get("error") or "",
+        },
+        "env": {
+            requirement: "present" if config.env_present(requirement) else "missing"
+            for requirement in state.REQUIRED_ENV_PRESENCE
+        },
+    }
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+    click.echo(f"Python: {result['python']}")
+    click.echo(f"Terraform: {result['terraform'] or 'missing'}")
+    click.echo(f"Spec: {'ok' if spec_ok else 'failed'} ({spec_count} stages)")
+    if spec_error:
+        click.echo(f"Spec error: {spec_error}")
+    cfg = result["runtime_config"]
+    click.echo(
+        f"Config: path={cfg['path']} found={cfg['found']} loaded={cfg['loaded']} "
+        f"error={cfg['error'] or '<none>'}"
+    )
+    for name, status in result["env"].items():
+        click.echo(f"{name}: {status}")
+
+
+@cli.group("live")
+def live() -> None:
+    """Live spec-gated runner commands."""
+
+
+@live.command("run")
+@click.option("--stage", help="Run one stage id from specs/health-check.json.")
+def live_run(stage: str | None) -> None:
+    """Run live health checks and write log.json/log.html."""
+    from healthcheck.runner import run  # noqa: PLC0415
+
+    try:
+        run(stage)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+
+@live.command("view")
+@click.argument("log_json", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--filter",
+    "filter_mode",
+    default="summary",
+    show_default=True,
+    help="View filter: summary, failed, blocked, queued, retained_resources, created_resources.",
+)
+def live_view(log_json: str, filter_mode: str) -> None:
+    """Render a filtered table from a live-run log.json file."""
+    from healthcheck.reporting import FILTER_CHOICES, render_table  # noqa: PLC0415
+
+    if filter_mode not in FILTER_CHOICES:
+        choices = ", ".join(FILTER_CHOICES)
+        click.echo(f"unknown filter {filter_mode!r}; choose one of: {choices}", err=True)
+        sys.exit(1)
+    data = json.loads(Path(log_json).read_text(encoding="utf-8-sig"))
+    click.echo(render_table(data, filter_mode))
+
+
+@live.command("stages")
+@click.option("--all", "include_all", is_flag=True, default=False, help="Include non-automated stages.")
+def live_stages(include_all: bool) -> None:
+    """List stage ids from specs/health-check.json."""
+    from healthcheck.spec_loader import load_spec, runnable_spec  # noqa: PLC0415
+
+    rows = []
+    for stage in load_spec().values():
+        runnable, reason = runnable_spec(stage)
+        if include_all or runnable:
+            rows.append(
+                {
+                    "id": stage.id,
+                    "status": stage.automation_status,
+                    "safe_for_daily_run": stage.safe_for_daily_run,
+                    "runnable": runnable,
+                    "reason": reason,
+                }
+            )
+    click.echo(json.dumps(rows, indent=2))
 
 
 @cli.group()
@@ -82,6 +195,8 @@ def db() -> None:
 @db.command("migrate")
 def db_migrate() -> None:
     """Apply idempotent Postgres initialization DDL."""
+    from hc.db import migrate  # noqa: PLC0415
+
     try:
         migrate()
     except Exception as exc:  # noqa: BLE001

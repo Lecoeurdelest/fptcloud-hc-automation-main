@@ -33,29 +33,26 @@ Copy-Item .env.example .env
 Fill in `.env`, then inspect the resolved inputs:
 
 ```powershell
-$env:PYTHONPATH = "src;scripts"
-python scripts\diagnose_health_inputs.py --json
+hc doctor --json
 ```
 
 Run one stage:
 
 ```powershell
-$env:PYTHONPATH = "src;scripts"
-python scripts\run_health_checks.py --stage object-storage.bucket
+hc live run --stage object-storage.bucket
 ```
 
 Run every automated stage allowed by the spec:
 
 ```powershell
-$env:PYTHONPATH = "src;scripts"
-python scripts\run_health_checks.py
+hc live run
 ```
 
 View a run report:
 
 ```powershell
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter summary
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter failed
+hc live view runs\<run_id>\log.json --filter summary
+hc live view runs\<run_id>\log.json --filter failed
 ```
 
 The latest run artifacts are written to:
@@ -64,21 +61,103 @@ The latest run artifacts are written to:
 - `runs/<run_id>/error_queue.json`
 - `log.html`
 
-## Running From Code Files
+## Installable CLI App
 
-The main live-run entrypoint is a normal Python file:
+The preferred operator entrypoint is the installed CLI:
+
+```powershell
+py -3.11 -m pip install -e ".[dev]"
+hc --help
+fptcloud-hc --help
+```
+
+Both `hc` and `fptcloud-hc` point to the same command group. `hc` is shorter
+for daily use; `fptcloud-hc` is easier to recognize in scripts and runbooks.
+
+Common commands:
+
+```powershell
+hc doctor
+hc doctor --json
+hc live stages
+hc live stages --all
+hc live run --stage object-storage.bucket
+hc live view runs\<run_id>\log.json --filter summary
+hc producer run --checklist checklist.yml --run-id smoke-local --dry-run
+```
+
+Command groups:
+
+| Command | Purpose |
+|---|---|
+| `hc doctor` | Check Python, Terraform, spec loading, TOML loading, and required env presence without creating cloud resources |
+| `hc live run` | Run the live spec-gated health-check runner |
+| `hc live view` | Render `log.json` as a filtered terminal table |
+| `hc live stages` | List stages from `specs/health-check.json` |
+| `hc producer` | Load `checklist.yml` and enqueue/dry-run queue tasks |
+| `hc queue` | Inspect Redis task queue state |
+| `hc dlq` | Inspect and replay dead-lettered queue entries |
+| `hc db` | Run Postgres initialization commands |
+
+The historical script still works for compatibility:
 
 ```powershell
 $env:PYTHONPATH = "src;scripts"
-python scripts\run_health_checks.py
+python scripts\run_health_checks.py --stage object-storage.bucket
+```
+
+Use the installed CLI for new workflows.
+
+## Build And Install The CLI
+
+Editable install for development:
+
+```powershell
+py -3.11 -m pip install -e ".[dev]"
+hc --help
+```
+
+Build a wheel:
+
+```powershell
+py -3.11 -m pip install build
+py -3.11 -m build
+```
+
+Install the built wheel into another environment:
+
+```powershell
+py -3.11 -m pip install dist\fptcloud_hc_automation-0.1.0-py3-none-any.whl
+hc doctor
+hc live stages
+```
+
+The wheel packages both runtime packages:
+
+- `src/hc`: queue/checklist framework and CLI.
+- `src/healthcheck`: live spec-gated runner.
+- `specs/`, `modules/`, and default `healthcheck.toml` runtime assets.
+
+It also includes the reporter HTML template and the diagnostics helper used by
+the live runner, so installed commands do not require `PYTHONPATH=scripts`.
+When running from an operator-managed checkout or config directory, set
+`HC_PROJECT_ROOT` to point the CLI at that directory. Otherwise the CLI uses the
+current working directory when it contains `specs/health-check.json` and
+`modules/`, then falls back to packaged assets.
+
+## Running From Code Files
+
+The main operator entrypoint is the installed CLI:
+
+```powershell
+hc live run
 ```
 
 Run a single stage by stage id:
 
 ```powershell
-$env:PYTHONPATH = "src;scripts"
-python scripts\run_health_checks.py --stage compute.discover-vpc
-python scripts\run_health_checks.py --stage object-storage.bucket
+hc live run --stage compute.discover-vpc
+hc live run --stage object-storage.bucket
 ```
 
 Run from Python code when embedding the runner in another script:
@@ -98,8 +177,8 @@ import run_health_checks
 run_health_checks.main()
 ```
 
-Before running from code, make sure `src` and `scripts` are on `PYTHONPATH`.
-The commands above set it explicitly for PowerShell.
+When running from an editable source checkout without installing the package,
+set `PYTHONPATH=src;scripts`. Installed CLI commands do not need `PYTHONPATH`.
 
 ## Checking Results From Log Files
 
@@ -121,23 +200,22 @@ Important files:
 Render a summary from a log file:
 
 ```powershell
-$env:PYTHONPATH = "src;scripts"
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter summary
+hc live view runs\<run_id>\log.json --filter summary
 ```
 
 Show only failed/blocked/queued resources:
 
 ```powershell
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter failed
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter blocked
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter queued
+hc live view runs\<run_id>\log.json --filter failed
+hc live view runs\<run_id>\log.json --filter blocked
+hc live view runs\<run_id>\log.json --filter queued
 ```
 
 Inspect created or retained resources:
 
 ```powershell
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter created_resources
-python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter retained_resources
+hc live view runs\<run_id>\log.json --filter created_resources
+hc live view runs\<run_id>\log.json --filter retained_resources
 ```
 
 Quick raw JSON checks:
@@ -361,8 +439,7 @@ keeps the gateway host offset. Environment variables
 Run object-storage end to end:
 
 ```powershell
-$env:PYTHONPATH = "src;scripts"
-python scripts\run_health_checks.py --stage object-storage.bucket
+hc live run --stage object-storage.bucket
 ```
 
 This stage creates a temporary bucket with Terraform, checks the S3 endpoint,
@@ -372,8 +449,7 @@ destroys the bucket.
 Compile check:
 
 ```powershell
-$env:PYTHONPATH = "src;scripts"
-python -m compileall src\healthcheck scripts\run_health_checks.py scripts\diagnose_health_inputs.py
+python -m compileall src scripts\run_health_checks.py scripts\diagnose_health_inputs.py
 ```
 
 Validate the spec:
@@ -601,10 +677,9 @@ check scenario should be added in this order.
    Run:
 
    ```powershell
-   $env:PYTHONPATH = "src;scripts"
    python scripts\validate_health_check_spec.py
-   python -m compileall src\healthcheck scripts\run_health_checks.py scripts\diagnose_health_inputs.py
-   python scripts\run_health_checks.py --stage my-new-stage
+   python -m compileall src scripts\run_health_checks.py scripts\diagnose_health_inputs.py
+   hc live run --stage my-new-stage
    ```
 
    If the stage touches real cloud resources, check
@@ -663,6 +738,7 @@ Guidelines:
 | `healthcheck.toml` | Runtime phase config; not a secret store |
 | `.env.example` | Environment template |
 | `modules/` | Terraform modules |
+| `src/hc/cli/main.py` | Installed `hc` / `fptcloud-hc` CLI |
 | `src/healthcheck/runner.py` | Live-run orchestrator |
 | `src/healthcheck/object_storage_runner.py` | Object-storage workflow |
 | `src/healthcheck/s3_client.py` | S3-compatible SigV4 probe client |
