@@ -1,0 +1,90 @@
+[runtime]
+config_version = 1
+
+[targets]
+# Ordered VPC display names/lookup keys for health-check coverage. The current
+# live runner resolves the first target for the single-VPC path; future
+# compute.select-vpc work will iterate this full list.
+vpcs = [
+  "FCI-L1-HAN-VPC",
+  "FCI-L1-OPS-HAN",
+]
+
+[phases."compute.create-instance"]
+# Env still has highest precedence. For example, HC_INSTANCE_DISK_SIZE_GB
+# overrides disk_gb and HC_KEEP_INSTANCE overrides delete_after_create.
+delete_after_create = false
+cleanup_on_quota_exceeded = false
+instances_per_apply = 1
+stop_on_quota_exceeded = true
+disk_gb = 40
+
+# Current VM module requires vpc_id + subnet_id. Set this false only after the
+# implementation supports no-subnet instance creation.
+attach_subnet = true
+
+# Security groups can be attached when IDs are known. HC_SECURITY_GROUP_ID still
+# works and overrides this list.
+attach_security_group = false
+security_group_ids = []
+
+# Feature toggles for later phases. When true today, validation fails before
+# Terraform so a requested-but-unimplemented workflow is not reported as passed.
+assign_floating_ip = false
+resize_after_create = false
+create_snapshot = false
+add_nic = false
+
+selection_order = [
+  "windows-2012",
+  "windows-2016",
+  "windows-2019",
+  "windows-2022",
+  "ubuntu-20-04",
+  "ubuntu-22-04",
+]
+
+[[phases."compute.create-instance".constraints]]
+key = "instances_per_apply"
+op = "=="
+value = 1
+message = "Current VM module creates one instance per Terraform apply."
+
+[[phases."compute.create-instance".constraints]]
+key = "attach_subnet"
+op = "=="
+value = true
+message = "Current VM module requires subnet_id for the primary NIC."
+
+[[phases."compute.create-instance".constraints]]
+key = "assign_floating_ip"
+op = "=="
+value = false
+message = "Floating IP assignment is not implemented in the current create-instance phase."
+
+[[phases."compute.create-instance".constraints]]
+key = "resize_after_create"
+op = "=="
+value = false
+message = "Resize after create is not implemented in the current create-instance phase."
+
+[[phases."compute.create-instance".constraints]]
+key = "create_snapshot"
+op = "=="
+value = false
+message = "Snapshot creation is not implemented in the current create-instance phase."
+
+[[phases."compute.create-instance".constraints]]
+key = "add_nic"
+op = "=="
+value = false
+message = "Additional NIC creation is not implemented in the current create-instance phase."
+
+[phases."object-storage.bucket"]
+# Terraform bucket creation needs an FPT object-storage region (examples from
+# the module: HCM-01, HCM-02, HN-01, HN-02). S3_REGION remains only for S3
+# request signing.
+region = "HN-01"
+bucket_prefix = "hc-object"
+test_key = "testfile.txt"
+test_body = "fptcloud health-check object storage probe"

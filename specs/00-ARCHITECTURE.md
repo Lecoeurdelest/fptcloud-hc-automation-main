@@ -149,6 +149,39 @@ tuple — same inputs produce same `resolved_vars` and therefore same
 `spec_hash`. Non-deterministic context (e.g. timestamp) is forbidden
 in vars.
 
+### 2.5.2 Runtime Phase Config
+
+The live health-check runner reads optional user-authored runtime configuration
+from `healthcheck.toml` (or `HC_CONFIG_TOML`) before assembling runnable stages.
+This file is not a generated artifact and is not a secret store. It lets an
+operator configure per-stage behavior while keeping implementation code stable.
+
+Configuration is keyed by stage id:
+
+```toml
+[phases."compute.create-instance"]
+delete_after_create = false
+instances_per_apply = 1
+attach_subnet = true
+assign_floating_ip = false
+resize_after_create = false
+create_snapshot = false
+add_nic = false
+```
+
+Precedence is:
+
+1. Environment variables.
+2. `healthcheck.toml` phase configuration.
+3. Defaults in `specs/health-check.json`.
+
+TOML constraints are structured data (`key`, `op`, `value`, optional
+`message`). The runner evaluates them before Terraform apply. If TOML requests
+behavior that is not implemented by the current module (for example floating IP
+assignment, resize, snapshot, or additional NIC in the current instance-create
+phase), validation fails or skips before mutation and records the reason in the
+run log.
+
 ### 2.6 Validator
 
 Each `TaskSpec` carries an `expected` block. Validators are pluggable:

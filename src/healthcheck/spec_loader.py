@@ -78,6 +78,8 @@ def input_configured(requirement: str) -> bool:
         from healthcheck import instance_runner
 
         return bool(instance_runner.selected_round_labels())
+    if requirement == "phases.object-storage.bucket.region":
+        return bool(config.object_storage_regions())
     if " or " in requirement:
         return any(input_configured(part.strip()) for part in requirement.split(" or "))
     return bool(config.env(requirement))
@@ -91,7 +93,7 @@ def preflight(check: Check) -> tuple[bool, str]:
     if blocked:
         return False, f"Blocked by incomplete dependency stage(s): {', '.join(blocked)}"
     if check.module == "object_storage" and not check.vars.get("region_name"):
-        return False, "No enabled object-storage region configured; set HC_ENABLED_OBJECT_REGIONS"
+        return False, "No enabled object-storage region configured; set HC_ENABLED_OBJECT_REGIONS, HC_OBJECT_REGION, or phases.object-storage.bucket.region/enabled_regions"
     missing_vars = [
         name for name in check.required_vars if check.vars.get(name) in (None, "", [], {})
     ]

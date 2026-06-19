@@ -90,7 +90,11 @@ Required tests:
 | FR-017 | Tag/name scoped deletion safety for any future user-confirmed destructive action. |
 | FR-018 | Permanently-unavailable image skip. |
 | FR-019 | Rolling-lifecycle report events with optimistic quota fields. |
+| FR-020 | Runtime phase configuration through `healthcheck.toml` / `HC_CONFIG_TOML`. |
+| FR-020a | Target VPC coverage is declared in `healthcheck.toml` `[targets].vpcs`, with `VPC_IDS`/`VPC_ID` kept as environment overrides. |
 | NFR-012 | Zero automatic deletion/recovery/retry after quota exceeded. |
 | C-012 | No quota API; quota precheck disabled. |
 | C-013 | Any future deletion requires explicit user confirmation and Terraform-backed safety. |
 | C-014 | Rolling tunables live in `constants.ROLLING_INSTANCE_STRATEGY`. |
+| NFR-014 | Runtime constraints are structured data and never evaluated as code. |
+| C-017 | TOML is runtime configuration, not provider auth or a secret store. |

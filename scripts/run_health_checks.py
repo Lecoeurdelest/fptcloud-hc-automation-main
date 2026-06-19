@@ -29,9 +29,11 @@ from healthcheck import (  # noqa: E402,F401
     instance_runner,
     logging,
     models,
+    object_storage_runner,
     reporting,
     runner,
     spec_loader,
+    stage_plan,
     state,
     terraform_executor,
 )
@@ -45,8 +47,10 @@ from healthcheck.logging import *  # noqa: E402,F401,F403
 from healthcheck.reporting import *  # noqa: E402,F401,F403
 from healthcheck.terraform_executor import *  # noqa: E402,F401,F403
 from healthcheck.spec_loader import *  # noqa: E402,F401,F403
+from healthcheck.stage_plan import *  # noqa: E402,F401,F403
 from healthcheck.discovery import *  # noqa: E402,F401,F403
 from healthcheck.instance_runner import *  # noqa: E402,F401,F403
+from healthcheck.object_storage_runner import *  # noqa: E402,F401,F403
 from healthcheck.cleanup import *  # noqa: E402,F401,F403
 from healthcheck.runner import *  # noqa: E402,F401,F403
 

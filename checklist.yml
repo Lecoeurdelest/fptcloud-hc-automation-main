@@ -7,9 +7,9 @@
 # table numbering is used here as the more complete and internally consistent
 # source.
 #
-# Gap items (no provider resource): TC-014, TC-015, TC-016, TC-022, TC-023,
-# TC-026. These use executor: api_fallback (Phase 7) and have expected.type:
-# manual as a temporary fallback (P3.T7, T-0315).
+# Gap items (no provider resource): TC-014, TC-015, TC-016, TC-022, TC-023.
+# These use executor: api_fallback (Phase 7) and have expected.type: manual as
+# a temporary fallback (P3.T7, T-0315). TC-026 uses the S3 client validator.
 
 run_id: smoke-run
 tenant_id: tenant-placeholder
@@ -433,20 +433,19 @@ test_cases:
         bucket: hc-bucket-001
         key: testfile.txt
 
-  # TC-026: Gap item — Connect via S3 endpoint
+  # TC-026: Connect via S3 endpoint
   - id: TC-026
     category: storage
-    description: "Kết nối bucket qua S3 endpoint (gap — client-side, not provider)"
-    gap: provider_resource_missing
+    description: "Kết nối bucket qua S3 endpoint"
     depends_on: [TC-024]
     spec:
       action: connect_s3
-      gap: provider_resource_missing
       vars:
         bucket_name: hc-bucket-001
     expected:
-      - type: manual
-        note: "S3 endpoint connectivity is client-side; no Terraform resource available (P7.T1)"
+      - type: api_probe
+        check: s3_endpoint_reachable
+        bucket: hc-bucket-001
 
   - id: TC-027
     category: storage

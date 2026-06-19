@@ -10,6 +10,51 @@ rationale tag.
 
 ---
 
+## 2026-06-19 — Runtime TOML phase configuration
+
+Spec-and-implementation alignment session. Added explicit spec coverage for the
+user-editable TOML runtime config so the live runner obeys the repository rule:
+no spec, no implementation.
+
+### Amendment 3 — TOML target VPC list
+- **Files:** [01-REQUIREMENTS.md](01-REQUIREMENTS.md), [05-SPEC-GOVERNANCE.md](05-SPEC-GOVERNANCE.md), [06-QUOTA-AWARE-ROLLING-STRATEGY.md](06-QUOTA-AWARE-ROLLING-STRATEGY.md), [health-check.json](health-check.json)
+- **Summary:** Moved the ordered target VPC coverage list to
+  `healthcheck.toml` `[targets].vpcs`, with `VPC_IDS`/`VPC_ID` retained as
+  environment overrides for compatibility. Current single-VPC discovery uses
+  the first target; future `compute.select-vpc` work will iterate the full list.
+- **Rationale:** `no-spec-no-implement`
+
+### Amendment 2 — S3 object-storage automation
+- **Files:** [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md), [health-check.json](health-check.json)
+- **Summary:** Converted the S3 endpoint checkpoint from a gap/manual item to
+  an automated object-storage probe: Terraform creates the bucket, the S3
+  client validates HEAD bucket, PUT object, HEAD object, DELETE object, and
+  Terraform destroys the bucket.
+- **Rationale:** `no-spec-no-implement`
+
+### New IDs introduced by amendment 2
+- **Stages:** `object-storage.upload-file`, `object-storage.connect-s3`,
+  `object-storage.delete-file`, `object-storage.delete-bucket`
+
+### Amendment 1 — Runtime phase config (FR-020, NFR-014, C-017)
+- **Files:** [00-ARCHITECTURE.md](00-ARCHITECTURE.md), [01-REQUIREMENTS.md](01-REQUIREMENTS.md), [02-INFRASTRUCTURE.md](02-INFRASTRUCTURE.md), [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md), [05-SPEC-GOVERNANCE.md](05-SPEC-GOVERNANCE.md), [06-QUOTA-AWARE-ROLLING-STRATEGY.md](06-QUOTA-AWARE-ROLLING-STRATEGY.md), [health-check.json](health-check.json)
+- **Summary:** Added runtime TOML phase configuration via `healthcheck.toml`
+  or `HC_CONFIG_TOML`, with environment > TOML > spec-default precedence,
+  structured pre-apply constraints, fail-closed unsupported toggles, and
+  logging requirements. Added Phase-5 task **P5.T11** and tests
+  **T-1214** through **T-1217**.
+- **Rationale:** `no-spec-no-implement`
+
+### New IDs introduced this session
+- **Functional requirements:** FR-020
+- **Non-functional requirements:** NFR-014
+- **Constraints:** C-017
+- **Architecture:** §2.5.2 (Runtime Phase Config)
+- **Subtasks:** P5.T11
+- **Tests:** T-1214, T-1215, T-1216, T-1217
+
+---
+
 ## 2026-06-16 — Architecture improvements (Atlassian OSB learnings)
 
 Spec-only session. Six amendments applied, zero skipped. Two new constraints,

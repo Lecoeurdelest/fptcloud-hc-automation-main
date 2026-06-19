@@ -8,6 +8,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - local Python 3.9 fallback.
+    import tomli as tomllib  # type: ignore[no-redef]
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "runs" / "diagnostics"
@@ -35,6 +40,49 @@ INSTANCE_IMAGE_MATRIX = (
     ("ubuntu-20-04", "HC_IMAGE_UBUNTU_20_04"),
     ("ubuntu-22-04", "HC_IMAGE_UBUNTU_22_04"),
 )
+
+
+def runtime_config() -> dict[str, Any]:
+    path = Path(os.environ.get("HC_CONFIG_TOML") or ROOT / "healthcheck.toml")
+    if not path.exists():
+        return {}
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def phase_value(stage_id: str, key: str, default: Any = None) -> Any:
+    phases = runtime_config().get("phases", {})
+    raw = phases.get(stage_id, {}) if isinstance(phases, dict) else {}
+    return raw.get(key, default) if isinstance(raw, dict) else default
+
+
+def object_storage_regions() -> list[str]:
+    raw = env("HC_ENABLED_OBJECT_REGIONS") or env("HC_OBJECT_REGION")
+    if raw:
+        return [value.strip() for value in raw.split(",") if value.strip()]
+    raw_regions = phase_value("object-storage.bucket", "enabled_regions", [])
+    if isinstance(raw_regions, list):
+        regions = [str(value).strip() for value in raw_regions if str(value).strip()]
+        if regions:
+            return regions
+    if isinstance(raw_regions, str) and raw_regions.strip():
+        return [value.strip() for value in raw_regions.split(",") if value.strip()]
+    raw_region = str(phase_value("object-storage.bucket", "region", "")).strip()
+    return [raw_region] if raw_region else []
+
+
+def runtime_string_list(section: str, key: str) -> list[str]:
+    raw_section = runtime_config().get(section, {})
+    if not isinstance(raw_section, dict):
+        return []
+    raw = raw_section.get(key, [])
+    if isinstance(raw, list):
+        return [str(value).strip() for value in raw if str(value).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [value.strip() for value in raw.split(",") if value.strip()]
+    return []
 
 
 def parse_dotenv_line(line: str) -> tuple[str, str] | None:
@@ -132,7 +180,9 @@ def spec_constants() -> dict[str, Any]:
 
 def vpc_values() -> list[str]:
     raw = env("VPC_IDS") or env("VPC_ID")
-    return [value.strip() for value in raw.split(",") if value.strip()]
+    if raw:
+        return [value.strip() for value in raw.split(",") if value.strip()]
+    return runtime_string_list("targets", "vpcs")
 
 
 def configured_vpc_lookup_key() -> str:
@@ -255,11 +305,7 @@ def stage_inputs() -> dict[str, Any]:
             },
         },
         "object_storage": {
-            "enabled_regions": [
-                value.strip()
-                for value in env("HC_ENABLED_OBJECT_REGIONS", env("HC_OBJECT_REGION", "")).split(",")
-                if value.strip()
-            ],
+            "enabled_regions": object_storage_regions(),
         },
     }
 
@@ -279,7 +325,7 @@ def diagnostics() -> dict[str, Any]:
 def warnings(context: dict[str, Any]) -> list[str]:
     result: list[str] = []
     if not context["explicit_vpc_id"] and not context["vpc_lookup_key"]:
-        result.append("No HC_VPC_ID, HC_VPC_NAME, VPC_NAME, VPC_ID, or VPC_IDS lookup key configured.")
+        result.append("No HC_VPC_ID, HC_VPC_NAME, VPC_NAME, VPC_ID, VPC_IDS, or healthcheck.toml [targets].vpcs lookup key configured.")
     elif not context["explicit_vpc_id"]:
         result.append("HC_VPC_ID is not configured; compute.discover-vpc must resolve data.fptcloud_vpc.this.id before dependent stages run.")
     elif not context["selected_vpc_looks_uuid"]:
@@ -294,8 +340,8 @@ def warnings(context: dict[str, Any]) -> list[str]:
         result.append("HC_STORAGE_POLICY_ID is not configured; storage and VM checks depend on storage-policy discovery.")
     if not env("HC_SUBNET_ID"):
         result.append("HC_SUBNET_ID is not configured; security-group and VM checks depend on subnet discovery or network creation.")
-    if not env("HC_ENABLED_OBJECT_REGIONS") and not env("HC_OBJECT_REGION"):
-        result.append("No enabled object-storage region configured; backup checks will be skipped.")
+    if not object_storage_regions():
+        result.append("No enabled object-storage region configured; object-storage checks will be skipped.")
     return result
 
 
@@ -325,11 +371,7 @@ def effective_config() -> dict[str, Any]:
         "flavor_name": env("HC_FLAVOR_NAME"),
         "upsize_flavor_name": env("HC_UPSIZE_FLAVOR_NAME"),
         "ssh_key": redact("HC_SSH_KEY", env("HC_SSH_KEY")),
-        "enabled_object_regions": [
-            value.strip()
-            for value in env("HC_ENABLED_OBJECT_REGIONS", env("HC_OBJECT_REGION", "")).split(",")
-            if value.strip()
-        ],
+        "enabled_object_regions": object_storage_regions(),
     }
 
 

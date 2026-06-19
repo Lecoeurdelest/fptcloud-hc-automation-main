@@ -83,6 +83,26 @@ input override is declared in the governing stage spec.
 Report events, summaries, report destinations, and redaction behavior must be
 declared in specs before implementation. Report output must not reveal secrets.
 
+## Runtime Configuration Policy
+
+User-editable runtime configuration may live in `healthcheck.toml` at the
+repository root, or in the path named by `HC_CONFIG_TOML`. This file is
+configuration, not a generated artifact. Environment variables retain highest
+precedence, followed by TOML phase configuration, followed by defaults declared
+in `specs/health-check.json`.
+
+Target infrastructure coverage may be declared in `[targets]`, for example
+`vpcs = ["FCI-L1-HAN-VPC", "FCI-L1-OPS-HAN"]`. Environment variables remain
+highest precedence, so `VPC_IDS` and `VPC_ID` override `[targets].vpcs` for
+compatibility.
+
+Phase configuration must be keyed by stage id, for example
+`[phases."compute.create-instance"]`. Constraint checks in TOML must be
+structured as `key`, `op`, `value`, and optional `message`; implementations must
+not evaluate arbitrary TOML expressions as code. Any requested phase behavior
+that is not implemented must fail or skip before Terraform apply rather than
+being reported as a pass.
+
 ## Generated Artifact Policy
 
 Generated artifacts must be declared before they are produced.

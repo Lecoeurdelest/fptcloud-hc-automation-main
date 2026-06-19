@@ -328,6 +328,12 @@ provisioned via Terraform, validated, and recorded — for one TC.
       (`docs/adr/001-async-validator.md`) documenting the decision with
       tradeoffs. If async is chosen, update `00-ARCHITECTURE.md` §2.6 and §3
       data flow. If inline is kept, document why and close. (phase: P5)
+- [~] **P5.T11** — Runtime TOML phase configuration: load `healthcheck.toml`
+      or `HC_CONFIG_TOML`, apply environment > TOML > spec-default precedence,
+      evaluate structured constraints before Terraform apply, log the loaded
+      config path/status, and fail closed when TOML requests an unsupported
+      phase behavior such as floating IP, resize, snapshot, or additional NIC.
+      Implementation is present; dedicated tests are still pending.
 
 ### DoD
 
@@ -339,6 +345,8 @@ provisioned via Terraform, validated, and recorded — for one TC.
 - [~] Live health-check reruns record `planned`, `active`, `pending`, `error`,
       and `destroyed` resource states in `log.html`; a final no-survivors state
       check confirms cleanup after success or failure.
+- [~] Runtime TOML phase config is reflected in `log.json`/`log.html`, and
+      unsupported toggles are blocked before Terraform apply.
 
 > Implementation note (2026-06-12): `scripts/run_health_checks.py` is the
 > current live-run harness while the full Phase 5 worker is still open. It
@@ -449,7 +457,6 @@ clear "feature requires provider support" note.
 | TC-016  | Revert snapshot          | not found                  | P7.T1             |
 | TC-017  | Create backup            | not found                  | P7.T1             |
 | TC-018  | Restore from backup      | not found                  | P7.T1             |
-| TC-023  | Connect via S3 endpoint  | client-side, not provider  | P7.T1 (validator) |
 
 If new provider resources land before phase 7 ships, file an issue with the
 resource name and bump the relevant TC to use it.

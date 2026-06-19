@@ -72,7 +72,8 @@ replayed) shall be persisted with timestamp, worker id, and attempt number.
 
 ### FR-014 — Multi-VPC rolling VM validation
 The health-check runner shall validate VM creation across all VPCs in
-`TARGET_VPCS` (resolved from `VPC_IDS`) in round-robin order, creating exactly
+`TARGET_VPCS` (resolved from `healthcheck.toml` `[targets].vpcs`, with
+`VPC_IDS`/`VPC_ID` as environment overrides) in round-robin order, creating exactly
 one VM per VPC per round and keeping each created VM. Governed by
 `06-QUOTA-AWARE-ROLLING-STRATEGY.md` §5.
 
@@ -117,6 +118,21 @@ and recorded as `image.skipped`, never attempted. Governed by §4/§9.
 `round.completed`, and the optimistic quota fields `quota_precheck=disabled`,
 `quota_assumption=assume_sufficient`, `quota_exceeded_action=stop_and_wait_for_user`,
 and `user_action_required=True` when quota blocks the run. Governed by §9.
+
+### FR-020 — Runtime phase configuration
+The live health-check runner shall accept user-editable runtime phase
+configuration from `healthcheck.toml` at the repository root, or from the path
+named by `HC_CONFIG_TOML`. Configuration shall be keyed by stage id, for
+example `[phases."compute.create-instance"]`, and may control phase-scoped
+options such as `delete_after_create`, `instances_per_apply`, subnet/security
+group/floating-IP attachment intent, resize intent, snapshot intent, additional
+NIC intent, disk size, and image selection order.
+
+Environment variables shall retain highest precedence, followed by TOML phase
+configuration, followed by defaults declared in `specs/health-check.json`.
+Requested behavior that is not implemented shall fail or skip before Terraform
+apply and must be reported in `log.json`/`log.html`; it must not be reported as
+a successful health-check.
 
 ## 2. Non-functional requirements
 
@@ -179,6 +195,12 @@ the next image until the user explicitly confirms the next action.
 No instance shall be deleted without verified ownership proof (health-check tag
 **and** HC name pattern). Missing tags, unreadable inventory, or import failure
 shall result in no deletion (fail-closed).
+
+### NFR-014 — Structured runtime constraints
+Runtime phase constraints authored in TOML shall be structured data only:
+`key`, `op`, `value`, and optional `message`. Implementations shall not evaluate
+arbitrary TOML expressions as code. Supported operators are `==`, `!=`, `<`,
+`<=`, `>`, `>=`, `in`, and `not_in`.
 
 ## 3. Constraints
 
@@ -272,6 +294,14 @@ Module selection shall be inferred from `spec.action` by the ChecklistLoader
 using an action-to-module registry (`config/action_registry.yml`). Dependency
 wiring shall be inferred from resource references, not manually specified
 (except for explicit overrides via `depends_on`).
+
+### C-017 — TOML is runtime configuration, not provider auth
+`healthcheck.toml` may configure phase behavior, but provider credentials and
+provider authentication values remain environment-only per C-009. TOML must not
+contain `FPTCLOUD_TOKEN`, private keys, generated passwords, or equivalent
+secrets. If a TOML option requests unsupported destructive behavior, mutation
+must be fail-closed before Terraform apply unless another spec explicitly
+allows it.
 
 ## 4. Out of scope (v1)
 

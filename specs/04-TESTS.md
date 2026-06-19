@@ -236,6 +236,11 @@ Run with: `make test-integration` (pytest marker: `@pytest.mark.integration`)
 - [ ] **T-1212** — If async validator: validator timeout → verdict becomes INCONCLUSIVE, not stuck (phase: P5.T10)
 - [ ] **T-1213** — After a Redis wipe, Producer re-reads `hc_tasks.state` and re-enqueues only PENDING/FAILED entries; no verdict lost (C-015) (phase: P3.T6)
 
+- [ ] **T-1214** — Runtime TOML config loads from `healthcheck.toml` or `HC_CONFIG_TOML`, with env vars taking precedence over TOML and TOML taking precedence over spec defaults (phase: P5.T11)
+- [ ] **T-1215** — Runtime TOML structured constraints fail before Terraform apply and report the configured message in `log.json`/`log.html` (phase: P5.T11)
+- [ ] **T-1216** — Unsupported TOML toggles (`assign_floating_ip`, `resize_after_create`, `create_snapshot`, `add_nic`) skip/fail before Terraform apply rather than reporting PASS (phase: P5.T11)
+- [ ] **T-1217** — `delete_after_create=true` destroys only the current-run instance workspace after successful readiness validation and records cleanup events (phase: P5.T11)
+
 ### Database integration
 
 - [ ] **T-1301** — Migration creates all tables and indexes (phase: P0.T4)
@@ -287,7 +292,7 @@ Run with: `make test-e2e` (pytest marker: `@pytest.mark.live`)
 
 - [ ] **T-2301** — TC-024: Create bucket → PASS (phase: P5.T8)
 - [ ] **T-2302** — TC-025: Upload file → openable in browser → PASS (phase: P5.T8)
-- [ ] **T-2303** — TC-026: Connect via S3 endpoint (gap) → INCONCLUSIVE (phase: P7.T1)
+- [ ] **T-2303** — TC-026: Connect via S3 endpoint → PASS (phase: P5.T8)
 - [ ] **T-2304** — TC-027: Delete file → PASS (phase: P5.T8)
 - [ ] **T-2305** — TC-028: Delete bucket → PASS (phase: P5.T8)
 

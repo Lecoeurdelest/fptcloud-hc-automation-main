@@ -274,7 +274,7 @@
         "FCI-L1-HAN-VPC",
         "FCI-L1-OPS-HAN"
       ],
-      "TARGET_VPCS_SOURCE": "VPC_IDS (resolved per-VPC by compute.discover-vpc)",
+      "TARGET_VPCS_SOURCE": "healthcheck.toml [targets].vpcs, overridden by VPC_IDS/VPC_ID when those env vars are set; entries are resolved per-VPC by compute.discover-vpc",
       "SUPPORTED_IMAGES": [
         "windows-2012",
         "windows-2016",
@@ -295,7 +295,7 @@
         "MAX_QUOTA_RECOVERY_ATTEMPTS": "HC_MAX_QUOTA_RECOVERY_ATTEMPTS",
         "INSTANCE_ACTIVE_TIMEOUT_S": "HC_INSTANCE_ACTIVE_TIMEOUT_S",
         "INSTANCE_ACTIVE_POLL_S": "HC_INSTANCE_ACTIVE_POLL_S",
-        "TARGET_VPCS": "VPC_IDS"
+        "TARGET_VPCS": "VPC_IDS or VPC_ID override healthcheck.toml [targets].vpcs"
       },
       "MULTI_VPC_EXECUTION_POLICY": {
         "order": "round_robin",
@@ -427,6 +427,11 @@
     "unsupported_provider_operation",
     "blocked_missing_subnet_id",
     "object_storage_region_disabled",
+    "s3_config_missing",
+    "s3_endpoint_unreachable",
+    "s3_object_upload_failed",
+    "s3_object_validation_failed",
+    "s3_object_delete_failed",
     "subnet_cidr_overlap",
     "subnet_cidr_overlap_preflight",
     "subnet_cidr_exhausted",
@@ -687,6 +692,116 @@
     "usage_policy": "Do not create or attach instance groups in this milestone unless a future spec explicitly requires placement or affinity validation.",
     "reporting": "Report instance_group_relevance=not_required_for_password_or_network_attachment in compute.create-instance diagnostics."
   },
+  "runtime_toml_config_policy": {
+    "default_path": "healthcheck.toml",
+    "override_env": "HC_CONFIG_TOML",
+    "precedence": [
+      "environment variables",
+      "healthcheck.toml phase configuration",
+      "spec defaults"
+    ],
+    "phase_table_pattern": "phases.\"<stage-id>\"",
+    "target_table_pattern": "targets.vpcs",
+    "constraint_schema": {
+      "required_fields": [
+        "key",
+        "op",
+        "value"
+      ],
+      "optional_fields": [
+        "message"
+      ],
+      "allowed_ops": [
+        "==",
+        "!=",
+        "<",
+        "<=",
+        ">",
+        ">=",
+        "in",
+        "not_in"
+      ],
+      "safety": "Constraints are parsed as structured data only; TOML expressions are never evaluated as code."
+    },
+    "compute_create_instance_keys": [
+      "delete_after_create",
+      "cleanup_on_quota_exceeded",
+      "instances_per_apply",
+      "stop_on_quota_exceeded",
+      "disk_gb",
+      "attach_subnet",
+      "attach_security_group",
+      "security_group_ids",
+      "assign_floating_ip",
+      "resize_after_create",
+      "create_snapshot",
+      "add_nic",
+      "selection_order"
+    ],
+    "target_config_keys": [
+      "targets.vpcs"
+    ],
+    "unsupported_toggle_policy": "If a TOML toggle requests a workflow not implemented by the current module, the runner must fail or skip before Terraform apply and log the constraint/config reason."
+  },
+  "runner_plan": {
+    "terraform_checks": [
+      {
+        "stage": "compute.create-instance",
+        "module": "vm",
+        "vars": "instance_validation",
+        "required_vars": [
+          "instances"
+        ]
+      },
+      {
+        "stage": "compute.create-subnet",
+        "module": "subnet",
+        "vars": "create_subnet",
+        "required_vars": [
+          "vpc_id"
+        ]
+      },
+      {
+        "stage": "network.security-group",
+        "module": "security_group",
+        "vars": "security_group",
+        "required_vars": [
+          "vpc_id",
+          "apply_to"
+        ]
+      },
+      {
+        "stage": "compute.add-disk",
+        "module": "disk",
+        "vars": "disk",
+        "required_vars": [
+          "vpc_id",
+          "storage_policy_id"
+        ]
+      },
+      {
+        "stage": "network.additional-subnet",
+        "module": "subnet",
+        "vars": "additional_subnet",
+        "required_vars": [
+          "vpc_id",
+          "cidr",
+          "gateway_ip"
+        ]
+      },
+      {
+        "stage": "object-storage.bucket",
+        "module": "object_storage",
+        "vars": "object_storage",
+        "required_vars": [
+          "vpc_id",
+          "region_name"
+        ],
+        "per_region": true,
+        "stop_group_on_success": "backup"
+      }
+    ]
+  },
   "stages": [
     {
       "id": "general.portal-login",
@@ -740,7 +855,7 @@
         "Existing VPC"
       ],
       "expected_result": "A real VPC ID is available from explicit HC_VPC_ID or from data.fptcloud_vpc.this.id.",
-      "validation_method": "Prefer explicit HC_VPC_ID as the effective VPC ID; otherwise query the official data.fptcloud_vpc data source by name using HC_VPC_NAME, VPC_NAME, VPC_ID, or VPC_IDS[0] as the configured lookup key.",
+      "validation_method": "Prefer explicit HC_VPC_ID as the effective VPC ID; otherwise query the official data.fptcloud_vpc data source by name using HC_VPC_NAME, VPC_NAME, VPC_ID, VPC_IDS[0], or healthcheck.toml [targets].vpcs[0] as the configured lookup key.",
       "cleanup_behavior": "No resources are created.",
       "dependency_stages": [],
       "failure_classification": "provider_or_backend_system_error",
@@ -2096,18 +2211,114 @@
     {
       "id": "object-storage.bucket",
       "manual_check_item": "Create bucket, upload file, create folder, open file, connect S3 endpoint, delete file, delete bucket",
-      "automation_status": "partially_automated",
+      "automation_status": "automated",
       "required_inputs": [
-        "HC_ENABLED_OBJECT_REGIONS"
+        "effective_vpc_id",
+        "HC_ENABLED_OBJECT_REGIONS or HC_OBJECT_REGION or phases.object-storage.bucket.region",
+        "S3_ENDPOINT",
+        "S3_REGION",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY"
       ],
       "required_cloud_resources": [
+        "VPC",
         "Object storage region"
       ],
-      "expected_result": "Temporary bucket is created in an enabled region and destroyed.",
-      "validation_method": "Terraform object_storage module; browser and S3 Browser checks remain manual.",
+      "expected_result": "Temporary bucket is created, S3 endpoint is reachable, object upload/head/delete checks pass, and bucket is destroyed.",
+      "validation_method": "Terraform object_storage module creates the bucket. Stdlib S3 SigV4 client performs HEAD bucket, PUT object, HEAD object, DELETE object, and post-delete HEAD object validation. Terraform destroy removes the bucket.",
       "cleanup_behavior": "Always destroy object storage resources created by the stage.",
-      "dependency_stages": [],
-      "failure_classification": "object_storage_region_disabled",
+      "dependency_stages": [
+        "compute.discover-vpc"
+      ],
+      "failure_classification": "s3_config_missing",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "object-storage.upload-file",
+      "manual_check_item": "Upload a test file to the temporary object storage bucket",
+      "automation_status": "automated",
+      "required_inputs": [
+        "S3_ENDPOINT",
+        "S3_REGION",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY"
+      ],
+      "required_cloud_resources": [
+        "Object storage bucket"
+      ],
+      "expected_result": "The configured test object is uploaded and HEAD object returns success.",
+      "validation_method": "S3 SigV4 PUT object followed by S3 SigV4 HEAD object.",
+      "cleanup_behavior": "Object is deleted by object-storage.delete-file before bucket destroy.",
+      "dependency_stages": [
+        "object-storage.bucket"
+      ],
+      "failure_classification": "s3_object_upload_failed",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "object-storage.connect-s3",
+      "manual_check_item": "Connect to the bucket through the configured S3 endpoint",
+      "automation_status": "automated",
+      "required_inputs": [
+        "S3_ENDPOINT",
+        "S3_REGION",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY"
+      ],
+      "required_cloud_resources": [
+        "Object storage bucket"
+      ],
+      "expected_result": "HEAD bucket against S3 endpoint returns success.",
+      "validation_method": "S3 SigV4 HEAD bucket request using configured endpoint and credentials.",
+      "cleanup_behavior": "No resources are created.",
+      "dependency_stages": [
+        "object-storage.bucket"
+      ],
+      "failure_classification": "s3_endpoint_unreachable",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "object-storage.delete-file",
+      "manual_check_item": "Delete the uploaded test file from object storage",
+      "automation_status": "automated",
+      "required_inputs": [
+        "S3_ENDPOINT",
+        "S3_REGION",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY"
+      ],
+      "required_cloud_resources": [
+        "Object storage bucket"
+      ],
+      "expected_result": "DELETE object succeeds and subsequent HEAD object returns not found.",
+      "validation_method": "S3 SigV4 DELETE object followed by HEAD object expecting 404/NotFound.",
+      "cleanup_behavior": "No resources are retained; deletes only the configured temporary object key in the temporary bucket.",
+      "dependency_stages": [
+        "object-storage.upload-file"
+      ],
+      "failure_classification": "s3_object_delete_failed",
+      "safe_for_daily_run": true
+    },
+    {
+      "id": "object-storage.delete-bucket",
+      "manual_check_item": "Delete the temporary object storage bucket",
+      "automation_status": "automated",
+      "required_inputs": [
+        "S3_ENDPOINT",
+        "S3_REGION",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY"
+      ],
+      "required_cloud_resources": [
+        "Object storage bucket"
+      ],
+      "expected_result": "Terraform destroy removes the temporary bucket after object cleanup.",
+      "validation_method": "Terraform destroy of the object_storage workspace.",
+      "cleanup_behavior": "Always destroy object storage resources created by the stage.",
+      "dependency_stages": [
+        "object-storage.delete-file"
+      ],
+      "failure_classification": "s3_object_validation_failed",
       "safe_for_daily_run": true
     },
     {
@@ -2160,13 +2371,14 @@
       ],
       "optional_inputs": [
         "VPC_IDS",
-        "TARGET_VPCS"
+        "TARGET_VPCS",
+        "healthcheck.toml [targets].vpcs"
       ],
       "required_cloud_resources": [
         "Existing VPC"
       ],
       "expected_result": "Future: Records the selected VPC name and effective_vpc_id for the round and emits vpc.selected. Per-VPC discovery (subnet, storage policy, flavor, image) runs downstream for the selected VPC.",
-      "validation_method": "Future: Resolve TARGET_VPCS from VPC_IDS. For each VPC in order, emit vpc.selected with vpc_name and effective_vpc_id, then run the existing per-VPC discovery and create pipeline. Do not proceed to the next VPC until the current VPC single VM is created, validated, and kept (or recorded quota-blocked).",
+      "validation_method": "Future: Resolve TARGET_VPCS from healthcheck.toml [targets].vpcs, with VPC_IDS/VPC_ID as env overrides. For each VPC in order, emit vpc.selected with vpc_name and effective_vpc_id, then run the existing per-VPC discovery and create pipeline. Do not proceed to the next VPC until the current VPC single VM is created, validated, and kept (or recorded quota-blocked).",
       "report_events": [],
       "report_events_future": [
         "vpc.selected"
@@ -2187,7 +2399,7 @@
       "dependency_stages": [],
       "failure_classification": "vpc_selection_failed",
       "safe_for_daily_run": true,
-      "identifier_policy": "Use VPC_IDS entries resolved by compute.discover-vpc. Do not synthesize VPC ids."
+      "identifier_policy": "Use healthcheck.toml [targets].vpcs entries, or VPC_IDS/VPC_ID env overrides, resolved by compute.discover-vpc. Do not synthesize VPC ids."
     },
     {
       "id": "compute.validate-instance-active",

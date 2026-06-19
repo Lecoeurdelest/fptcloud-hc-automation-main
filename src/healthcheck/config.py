@@ -10,6 +10,14 @@ import os
 from pathlib import Path
 from typing import Any
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - project runtime is Python 3.11.
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
+
 from diagnose_health_inputs import DOTENV_RESULT as INPUT_DOTENV_RESULT
 from diagnose_health_inputs import effective_config
 
@@ -85,6 +93,151 @@ def env_presence_report() -> str:
 DOTENV_RESULT = INPUT_DOTENV_RESULT if INPUT_DOTENV_RESULT.get("found") else load_dotenv()
 
 
+def runtime_config_path() -> Path:
+    configured = os.environ.get("HC_CONFIG_TOML", "").strip()
+    return Path(configured) if configured else state.ROOT / "healthcheck.toml"
+
+
+def load_runtime_config(path: Path | None = None) -> dict[str, Any]:
+    config_path = path or runtime_config_path()
+    result: dict[str, Any] = {
+        "path": str(config_path),
+        "found": config_path.exists(),
+        "loaded": False,
+        "error": "",
+        "data": {},
+    }
+    if not config_path.exists():
+        return result
+    if tomllib is None:
+        result["error"] = "Python 3.11 tomllib or tomli is required to read healthcheck.toml"
+        return result
+    try:
+        result["data"] = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        result["loaded"] = True
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        result["error"] = str(exc)
+    return result
+
+
+RUNTIME_CONFIG_RESULT = load_runtime_config()
+
+
+def runtime_config() -> dict[str, Any]:
+    data = RUNTIME_CONFIG_RESULT.get("data", {})
+    return data if isinstance(data, dict) else {}
+
+
+def phase_config(stage_id: str) -> dict[str, Any]:
+    phases = runtime_config().get("phases", {})
+    if not isinstance(phases, dict):
+        return {}
+    raw = phases.get(stage_id, {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def phase_value(stage_id: str, key: str, default: Any = None) -> Any:
+    return phase_config(stage_id).get(key, default)
+
+
+def phase_bool(stage_id: str, key: str, default: bool) -> bool:
+    raw = phase_value(stage_id, key, default)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(raw)
+
+
+def phase_int(stage_id: str, key: str, default: int, *, minimum: int = 0) -> int:
+    raw = phase_value(stage_id, key, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, value)
+
+
+def phase_string_list(stage_id: str, key: str) -> list[str]:
+    raw = phase_value(stage_id, key, [])
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return []
+
+
+def runtime_string_list(section: str, key: str) -> list[str]:
+    raw_section = runtime_config().get(section, {})
+    if not isinstance(raw_section, dict):
+        return []
+    raw = raw_section.get(key, [])
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return []
+
+
+def target_vpcs() -> list[str]:
+    raw = env("VPC_IDS") or env("VPC_ID")
+    if raw:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return runtime_string_list("targets", "vpcs")
+
+
+def _constraint_ok(actual: Any, op: str, expected: Any) -> bool:
+    if op == "==":
+        return actual == expected
+    if op == "!=":
+        return actual != expected
+    if op in {"<", "<=", ">", ">="}:
+        try:
+            left = float(actual)
+            right = float(expected)
+        except (TypeError, ValueError):
+            return False
+        if op == "<":
+            return left < right
+        if op == "<=":
+            return left <= right
+        if op == ">":
+            return left > right
+        return left >= right
+    if op == "in":
+        return isinstance(expected, list) and actual in expected
+    if op == "not_in":
+        return isinstance(expected, list) and actual not in expected
+    return False
+
+
+def validate_phase_constraints(stage_id: str, values: dict[str, Any] | None = None) -> list[str]:
+    phase = phase_config(stage_id)
+    constraints = phase.get("constraints", [])
+    if not isinstance(constraints, list):
+        return [f"{stage_id}: constraints must be a list"]
+    merged = dict(phase)
+    if values:
+        merged.update(values)
+    errors: list[str] = []
+    for index, constraint in enumerate(constraints, start=1):
+        if not isinstance(constraint, dict):
+            errors.append(f"{stage_id}: constraint #{index} must be an object")
+            continue
+        key = str(constraint.get("key", "")).strip()
+        op = str(constraint.get("op", "")).strip()
+        expected = constraint.get("value")
+        message = str(constraint.get("message") or "").strip()
+        if not key or not op:
+            errors.append(f"{stage_id}: constraint #{index} requires key and op")
+            continue
+        actual = merged.get(key)
+        if not _constraint_ok(actual, op, expected):
+            detail = message or f"{key} {op} {expected!r} failed (actual={actual!r})"
+            errors.append(detail)
+    return errors
+
+
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
@@ -101,11 +254,22 @@ def env_bool_default(name: str, default: bool) -> bool:
 
 
 def keep_instance_enabled() -> bool:
+    if env("HC_KEEP_INSTANCE"):
+        return env_bool_default("HC_KEEP_INSTANCE", True)
+    delete_after_create = phase_bool(state.INSTANCE_CREATE_STAGE, "delete_after_create", False)
+    if delete_after_create:
+        return False
     # specs/health-check.json INSTANCE_CLEANUP_POLICY: HC_KEEP_INSTANCE defaults to true.
     return env_bool_default("HC_KEEP_INSTANCE", True)
 
 
 def cleanup_on_quota_exceeded_enabled() -> bool:
+    if not env("HC_CLEANUP_ON_QUOTA_EXCEEDED"):
+        return phase_bool(
+            state.INSTANCE_CREATE_STAGE,
+            "cleanup_on_quota_exceeded",
+            False,
+        )
     # specs/health-check.json INSTANCE_CLEANUP_POLICY: HC_CLEANUP_ON_QUOTA_EXCEEDED defaults to false.
     return env_bool_default("HC_CLEANUP_ON_QUOTA_EXCEEDED", False)
 
@@ -143,17 +307,24 @@ def batching_int(name: str, fallback: int) -> int:
 
 
 def instances_per_apply() -> int:
-    # specs/health-check.json INSTANCE_BATCHING_POLICY: health checks create exactly one VM per apply.
-    return 1
+    default = batching_int("HC_INSTANCES_PER_APPLY", 1)
+    if env("HC_INSTANCES_PER_APPLY"):
+        return max(1, default)
+    return phase_int(state.INSTANCE_CREATE_STAGE, "instances_per_apply", default, minimum=1)
 
 
 def stop_on_quota_exceeded_enabled() -> bool:
+    if "stop_on_quota_exceeded" in phase_config(state.INSTANCE_CREATE_STAGE):
+        return phase_bool(state.INSTANCE_CREATE_STAGE, "stop_on_quota_exceeded", True)
     # Quota handling is optimistic-apply-only: any provider-side quota rejection
     # stops the run and waits for explicit user confirmation.
     return True
 
 
 def instance_selection_order() -> list[str]:
+    phase_order = phase_string_list(state.INSTANCE_CREATE_STAGE, "selection_order")
+    if phase_order:
+        return phase_order
     order = instance_batching_policy().get("selection_order", [])
     if isinstance(order, list) and order:
         return [str(item) for item in order]
@@ -194,6 +365,8 @@ def root_disk_size_source() -> str:
         return "HC_INSTANCE_DISK_SIZE_GB"
     if env("HC_ROOT_DISK_SIZE"):
         return "HC_ROOT_DISK_SIZE"
+    if "disk_gb" in phase_config(state.INSTANCE_CREATE_STAGE):
+        return "healthcheck.toml:phases.compute.create-instance.disk_gb"
     return "default"
 
 
@@ -205,7 +378,8 @@ def root_disk_size() -> tuple[int | None, str]:
         .get("INSTANCE_QUOTA_INSPECTION_POLICY", {})
         .get("HC_INSTANCE_DISK_SIZE_GB_default", 40),
     )
-    raw = env("HC_INSTANCE_DISK_SIZE_GB") or env("HC_ROOT_DISK_SIZE") or str(policy_default)
+    toml_disk_size = phase_value(state.INSTANCE_CREATE_STAGE, "disk_gb", None)
+    raw = env("HC_INSTANCE_DISK_SIZE_GB") or env("HC_ROOT_DISK_SIZE") or toml_disk_size or str(policy_default)
     try:
         value = int(raw)
     except ValueError:
@@ -227,3 +401,111 @@ def reduced_disk_test(disk_size: int | None = None) -> bool:
     value = disk_size if disk_size is not None else root_disk_size()[0]
     official = official_instance_disk_size_gb()
     return bool(value and value != official)
+
+
+def instance_delete_after_create_enabled() -> bool:
+    return phase_bool(state.INSTANCE_CREATE_STAGE, "delete_after_create", False)
+
+
+def instance_attach_subnet_enabled() -> bool:
+    return phase_bool(state.INSTANCE_CREATE_STAGE, "attach_subnet", True)
+
+
+def instance_assign_floating_ip_enabled() -> bool:
+    return phase_bool(state.INSTANCE_CREATE_STAGE, "assign_floating_ip", False)
+
+
+def instance_attach_security_group_enabled() -> bool:
+    return phase_bool(state.INSTANCE_CREATE_STAGE, "attach_security_group", bool(env("HC_SECURITY_GROUP_ID")))
+
+
+def instance_security_group_ids() -> list[str]:
+    if env("HC_SECURITY_GROUP_ID"):
+        return [env("HC_SECURITY_GROUP_ID")]
+    if not instance_attach_security_group_enabled():
+        return []
+    return phase_string_list(state.INSTANCE_CREATE_STAGE, "security_group_ids")
+
+
+def instance_resize_after_create_enabled() -> bool:
+    return phase_bool(state.INSTANCE_CREATE_STAGE, "resize_after_create", False)
+
+
+def instance_create_snapshot_enabled() -> bool:
+    return phase_bool(state.INSTANCE_CREATE_STAGE, "create_snapshot", False)
+
+
+def instance_add_nic_enabled() -> bool:
+    return phase_bool(state.INSTANCE_CREATE_STAGE, "add_nic", False)
+
+
+def instance_phase_runtime_values() -> dict[str, Any]:
+    return {
+        "delete_after_create": instance_delete_after_create_enabled(),
+        "keep_instance": keep_instance_enabled(),
+        "cleanup_on_quota_exceeded": cleanup_on_quota_exceeded_enabled(),
+        "instances_per_apply": instances_per_apply(),
+        "stop_on_quota_exceeded": stop_on_quota_exceeded_enabled(),
+        "attach_subnet": instance_attach_subnet_enabled(),
+        "assign_floating_ip": instance_assign_floating_ip_enabled(),
+        "attach_security_group": instance_attach_security_group_enabled(),
+        "security_group_ids": instance_security_group_ids(),
+        "resize_after_create": instance_resize_after_create_enabled(),
+        "create_snapshot": instance_create_snapshot_enabled(),
+        "add_nic": instance_add_nic_enabled(),
+        "disk_gb": root_disk_size()[0],
+    }
+
+
+def object_storage_regions() -> list[str]:
+    raw = env("HC_ENABLED_OBJECT_REGIONS") or env("HC_OBJECT_REGION")
+    if raw:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    regions = phase_string_list("object-storage.bucket", "enabled_regions")
+    if regions:
+        return regions
+    region = phase_value("object-storage.bucket", "region", "")
+    return [str(region).strip()] if str(region).strip() else []
+
+
+def object_storage_bucket_prefix() -> str:
+    return env(
+        "HC_OBJECT_BUCKET_PREFIX",
+        str(phase_value("object-storage.bucket", "bucket_prefix", "hc-object")),
+    )
+
+
+def object_storage_test_key() -> str:
+    return env(
+        "HC_OBJECT_TEST_KEY",
+        str(phase_value("object-storage.bucket", "test_key", "testfile.txt")),
+    )
+
+
+def object_storage_test_body() -> bytes:
+    return env(
+        "HC_OBJECT_TEST_BODY",
+        str(
+            phase_value(
+                "object-storage.bucket",
+                "test_body",
+                "fptcloud health-check object storage probe",
+            )
+        ),
+    ).encode(
+        "utf-8"
+    )
+
+
+def s3_config() -> dict[str, str]:
+    return {
+        "endpoint": env("S3_ENDPOINT"),
+        "region": env("S3_REGION"),
+        "access_key": env("S3_ACCESS_KEY"),
+        "secret_key": env("S3_SECRET_KEY"),
+    }
+
+
+def missing_s3_config() -> list[str]:
+    values = s3_config()
+    return [name.upper() for name, value in values.items() if not value]

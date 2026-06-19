@@ -553,12 +553,33 @@ def instance_base_inputs(
         errors.append("validated_instance_hostnames is required")
     if disk_error:
         errors.append(disk_error)
+    phase_values = config.instance_phase_runtime_values()
+    constraint_errors = config.validate_phase_constraints(
+        state.INSTANCE_CREATE_STAGE, phase_values
+    )
+    errors.extend(f"TOML constraint failed: {error}" for error in constraint_errors)
+    if phase_values["instances_per_apply"] != 1:
+        errors.append(
+            "instances_per_apply values other than 1 are not supported by the current vm module"
+        )
+    if not phase_values["attach_subnet"]:
+        errors.append("attach_subnet=false is not supported by the current vm module")
+    if phase_values["assign_floating_ip"]:
+        errors.append("assign_floating_ip=true requires a future floating-ip stage implementation")
+    if phase_values["attach_security_group"] and not phase_values["security_group_ids"]:
+        errors.append("attach_security_group=true requires security_group_ids or HC_SECURITY_GROUP_ID")
+    if phase_values["resize_after_create"]:
+        errors.append("resize_after_create=true requires a future resize stage implementation")
+    if phase_values["create_snapshot"]:
+        errors.append("create_snapshot=true requires a future snapshot stage implementation")
+    if phase_values["add_nic"]:
+        errors.append("add_nic=true requires a future additional-NIC stage implementation")
     keep_instance = config.keep_instance_enabled()
     cleanup_on_quota_exceeded = config.cleanup_on_quota_exceeded_enabled()
     quota_report = dict(
         state.run_context.get("instance_quota") or optimistic_quota_report(disk_size)
     )
-    security_group_id = config.env("HC_SECURITY_GROUP_ID")
+    security_group_ids = config.instance_security_group_ids()
     instances: list[dict[str, Any]] = []
     for label, var_name in state.INSTANCE_IMAGE_MATRIX:
         if not require_all_images and not (config.env(var_name) or discovered_images.get(label)):
@@ -592,7 +613,7 @@ def instance_base_inputs(
                     "status": "POWERED_ON",
                     "password": state.GENERATED_INSTANCE_PASSWORD,
                     "ssh_key": config.env("HC_SSH_KEY") or None,
-                    "security_group_ids": [security_group_id] if security_group_id else [],
+                    "security_group_ids": security_group_ids,
                     "tags": build_hc_instance_tags(
                         vpc_name=state.run_context.get("vpc_name") or discovery.vpc_lookup_key(),
                         os_label=label,
@@ -653,6 +674,16 @@ def instance_base_inputs(
         "keep_instance": keep_instance,
         "cleanup_on_quota_exceeded": cleanup_on_quota_exceeded,
         "cleanup_policy": "retain_by_default",
+        "delete_after_create": phase_values["delete_after_create"],
+        "toml_config_path": config.RUNTIME_CONFIG_RESULT.get("path", ""),
+        "toml_config_loaded": bool(config.RUNTIME_CONFIG_RESULT.get("loaded")),
+        "toml_constraint_count": len(config.phase_config(state.INSTANCE_CREATE_STAGE).get("constraints", [])),
+        "attach_subnet": phase_values["attach_subnet"],
+        "assign_floating_ip": phase_values["assign_floating_ip"],
+        "attach_security_group": phase_values["attach_security_group"],
+        "resize_after_create": phase_values["resize_after_create"],
+        "create_snapshot": phase_values["create_snapshot"],
+        "add_nic": phase_values["add_nic"],
         "quota_precheck": quota_report.get("quota_precheck", "disabled"),
         "quota_assumption": quota_report.get("quota_assumption", "assume_sufficient"),
         "quota_exceeded_action": quota_report.get(
@@ -739,6 +770,11 @@ def validate_instance_stage(stage, suffix: str, subnet_id: str, storage_policy_i
                 f"instance_name_pattern={config.env('HC_INSTANCE_NAME_PREFIX', 'hc-vm')}-<os>-{suffix[-8:]}; disk_size={diagnostics['disk_size']}; "
                 f"disk_size_source={diagnostics['disk_size_source']}; reduced_disk_test={diagnostics['reduced_disk_test']}; "
                 f"password_generated={diagnostics['password_generated']}; password_redacted={diagnostics['password_redacted']}; ssh_key_present={diagnostics['ssh_key_present']}; "
+                f"toml_config_path={diagnostics['toml_config_path']}; toml_config_loaded={diagnostics['toml_config_loaded']}; "
+                f"toml_constraint_count={diagnostics['toml_constraint_count']}; "
+                f"delete_after_create={diagnostics['delete_after_create']}; attach_subnet={diagnostics['attach_subnet']}; "
+                f"assign_floating_ip={diagnostics['assign_floating_ip']}; attach_security_group={diagnostics['attach_security_group']}; "
+                f"resize_after_create={diagnostics['resize_after_create']}; create_snapshot={diagnostics['create_snapshot']}; add_nic={diagnostics['add_nic']}; "
                 f"{cleanup_policy_summary()}; "
                 f"terraform_vars={json.dumps(redacted_vars(vars), sort_keys=True)}"
             ),
@@ -777,6 +813,11 @@ def validate_instance_stage(stage, suffix: str, subnet_id: str, storage_policy_i
             f"instance_name_pattern={config.env('HC_INSTANCE_NAME_PREFIX', 'hc-vm')}-<os>-{suffix[-8:]}; disk_size={diagnostics['disk_size']}; "
             f"disk_size_source={diagnostics['disk_size_source']}; reduced_disk_test={diagnostics['reduced_disk_test']}; "
             f"password_generated={diagnostics['password_generated']}; password_redacted={diagnostics['password_redacted']}; ssh_key_present={diagnostics['ssh_key_present']}; "
+            f"toml_config_path={diagnostics['toml_config_path']}; toml_config_loaded={diagnostics['toml_config_loaded']}; "
+            f"toml_constraint_count={diagnostics['toml_constraint_count']}; "
+            f"delete_after_create={diagnostics['delete_after_create']}; attach_subnet={diagnostics['attach_subnet']}; "
+            f"assign_floating_ip={diagnostics['assign_floating_ip']}; attach_security_group={diagnostics['attach_security_group']}; "
+            f"resize_after_create={diagnostics['resize_after_create']}; create_snapshot={diagnostics['create_snapshot']}; add_nic={diagnostics['add_nic']}; "
             f"{cleanup_policy_summary()}; "
             f"terraform_vars={json.dumps(redacted_vars(vars), sort_keys=True)}"
         ),
@@ -916,9 +957,16 @@ def validate_instance_network_stage(stage) -> None:
         str((item.get("vars") or {}).get("name") or item.get("label") or "") for item in instances
     )
     first_vars = dict((instances[0].get("vars") if instances else {}) or {})
-    public_ip_configured = bool(first_vars.get("public_ip") or config.env("HC_PUBLIC_IP"))
+    phase_values = config.instance_phase_runtime_values()
+    public_ip_configured = bool(
+        first_vars.get("public_ip")
+        or config.env("HC_PUBLIC_IP")
+        or phase_values["assign_floating_ip"]
+    )
     security_group_configured = bool(
-        first_vars.get("security_group_ids") or config.env("HC_SECURITY_GROUP_ID")
+        first_vars.get("security_group_ids")
+        or config.env("HC_SECURITY_GROUP_ID")
+        or phase_values["attach_security_group"]
     )
     message = (
         f"generated_suffix={state.INSTANCE_RUN_SUFFIX}; effective_vpc_id={state.run_context.get('effective_vpc_id') or '<unset>'}; "
@@ -926,6 +974,8 @@ def validate_instance_network_stage(stage) -> None:
         f"effective_storage_policy_id={state.run_context.get('effective_storage_policy_id') or '<unset>'}; "
         f"network_attachment_fields=vpc_id,subnet_id; subnet_vpc_membership=not_verified; "
         f"security_group_configured={security_group_configured}; public_ip_configured={public_ip_configured}; "
+        f"delete_after_create={phase_values['delete_after_create']}; resize_after_create={phase_values['resize_after_create']}; "
+        f"create_snapshot={phase_values['create_snapshot']}; add_nic={phase_values['add_nic']}; "
         f"connection_test_policy=manual_verification_required; instance_names={names or '<none>'}; "
         f"terraform_network_vars={json.dumps(redacted_vars({'vpc_id': first_vars.get('vpc_id'), 'subnet_id': first_vars.get('subnet_id'), 'storage_policy_id': first_vars.get('storage_policy_id'), 'security_group_ids': list(first_vars.get('security_group_ids') or [])}), sort_keys=True)}"
     )
@@ -1114,6 +1164,14 @@ def _execute_one_image_attempt(
             f"reduced_disk_test={diagnostics.get('reduced_disk_test', False)}; instance_name={matrix_check.vars.get('name')}; "
             f"generated_suffix={state.INSTANCE_RUN_SUFFIX}; network_attachment_fields=vpc_id,subnet_id; "
             f"password_generated={bool(state.GENERATED_INSTANCE_PASSWORD)}; password_redacted=True; "
+            f"toml_config_path={diagnostics.get('toml_config_path', '')}; toml_config_loaded={diagnostics.get('toml_config_loaded', False)}; "
+            f"toml_constraint_count={diagnostics.get('toml_constraint_count', 0)}; "
+            f"delete_after_create={diagnostics.get('delete_after_create', False)}; "
+            f"attach_subnet={diagnostics.get('attach_subnet', True)}; "
+            f"assign_floating_ip={diagnostics.get('assign_floating_ip', False)}; "
+            f"attach_security_group={diagnostics.get('attach_security_group', False)}; "
+            f"resize_after_create={diagnostics.get('resize_after_create', False)}; "
+            f"create_snapshot={diagnostics.get('create_snapshot', False)}; add_nic={diagnostics.get('add_nic', False)}; "
             f"public_ip_configured={bool(matrix_check.vars.get('public_ip') or config.env('HC_PUBLIC_IP'))}; "
             f"security_group_configured={bool(matrix_check.vars.get('security_group_ids') or config.env('HC_SECURITY_GROUP_ID'))}; "
             f"connection_test_policy=manual_verification_required; instance_group_relevance=not_required_for_password_or_network_attachment; "
@@ -1251,14 +1309,52 @@ def _execute_one_image_attempt(
                 f"os_label={label}; attempt={attempt}; {ready_reason}",
             )
             wait_for_pending()
-        cleanup.retain_instance(
-            check.name,
-            label=label,
-            instance_id=created_id,
-            classification="",
-            failed=False,
-            resources=current or planned or base_resources,
-        )
+        if config.instance_delete_after_create_enabled():
+            cleanup_resources = current or planned or base_resources
+            emit(
+                f"{check.name}:cleanup",
+                "started",
+                (
+                    f"delete_after_create=True; os_label={label}; "
+                    "destroying current-run instance workspace after successful validation"
+                ),
+                cleanup_resources,
+            )
+            destroy_result = tf.run_instance_terraform(
+                ["terraform", "destroy", "-auto-approve", "-no-color", "-input=false"],
+                workspace,
+                stage=f"{check.name}-{label}-delete-after-create",
+            )
+            if destroy_result.returncode == 0:
+                emit(
+                    f"{check.name}:cleanup",
+                    "destroyed",
+                    (
+                        f"delete_after_create=True; os_label={label}; "
+                        f"deleted_instance_ids={json.dumps([created_id] if created_id else [])}"
+                    ),
+                    cleanup_resources,
+                )
+            else:
+                queue_error(
+                    f"{check.name}:cleanup",
+                    workspace,
+                    cleanup_resources,
+                    (
+                        "Classification: instance_cleanup_failed; "
+                        "delete_after_create=True; terraform destroy failed; "
+                        f"{(destroy_result.stderr or destroy_result.stdout)[-1200:]}"
+                    ),
+                )
+        else:
+            cleanup.retain_instance(
+                check.name,
+                label=label,
+                instance_id=created_id,
+                classification="",
+                failed=False,
+                resources=current or planned or base_resources,
+            )
         return _ImageCreateResult(
             label=label,
             succeeded=True,

@@ -1,208 +1,404 @@
 # fptcloud-hc-automation
 
-Spec-driven framework that runs an FPT Cloud tenant QA checklist as a pipeline.
-Each checklist checkpoint becomes a unique, retryable task on a Redis Streams queue;
-a Terraform executor materializes it via the `fpt-corp/fptcloud` provider, a Validator
-asserts the expected state, and a Reporter emits the verdict.
+This README is **non-authoritative** operational guidance. If anything here
+conflicts with the specs, the files under `specs/` win, especially
+`specs/health-check.json`, `specs/03-TASKS.md`, `specs/04-TESTS.md`, and
+`specs/05-SPEC-GOVERNANCE.md`.
 
-The design contract lives in `specs/`. If any file outside `specs/` conflicts with it,
-`specs/` wins.
+This project runs FPT Cloud tenant health checks from the spec catalog. The
+live runner loads `.env`, reads per-phase runtime settings from
+`healthcheck.toml`, assembles runnable stages from `specs/health-check.json`,
+uses Terraform modules when a stage creates cloud resources, runs API/S3 probes
+for validation, and writes results to `runs/<run_id>/log.json` and `log.html`.
 
 ## Requirements
 
-- **Python 3.11** (exactly `>=3.11,<3.12`) — sufficient for all queue, checklist, and API-inventory operations
-- Redis 7+ — only needed for persistent runs; replaced by in-process `fakeredis` via `HC_USE_FAKEREDIS=1`
-- PostgreSQL 14+ — only needed for result persistence (`hc db migrate`, worker result rows)
-- Docker + Docker Compose — optional convenience wrapper for Redis and Postgres
+- Python `>=3.11,<3.12`, as declared in `pyproject.toml`.
+- Terraform CLI. The live `scripts/run_health_checks.py` path currently uses
+  modules under `modules/` and the `fpt-corp/fptcloud` provider.
+- Redis/Postgres are only required for the queue worker/producer CLI path; they
+  are not required for the live health-check runner.
+- Valid FPT Cloud credentials in `.env`.
+- S3 credentials when running object-storage checks.
 
-> **No Terraform CLI required.** FPT Cloud resources are read via direct Python HTTP calls
-> (`urllib.request`, stdlib only). The `TerraformExecutor` is a Phase 5 worker component
-> that is not yet active; all currently functional paths are pure Python.
-
-## Quick start
-
-All queue, checklist, and inventory operations run with in-process `fakeredis` and
-stdlib HTTP — no Redis server, no Docker, no Postgres, no Terraform needed.
+## Quick Start
 
 ```powershell
-# 1. Install (editable, with dev tools)
 py -3.11 -m pip install -e ".[dev]"
-
-# 2. Copy credentials file and fill in FPTCLOUD_* values
 Copy-Item .env.example .env
+```
 
-# 3. Tell the queue layer to use in-process fakeredis
+Fill in `.env`, then inspect the resolved inputs:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\diagnose_health_inputs.py --json
+```
+
+Run one stage:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\run_health_checks.py --stage object-storage.bucket
+```
+
+Run every automated stage allowed by the spec:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\run_health_checks.py
+```
+
+View a run report:
+
+```powershell
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter summary
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter failed
+```
+
+The latest run artifacts are written to:
+
+- `runs/<run_id>/log.json`
+- `runs/<run_id>/error_queue.json`
+- `log.html`
+
+## `.env` Configuration
+
+Copy `.env.example` to `.env`. Never commit real `.env` files.
+
+Required provider settings:
+
+| Variable | Description |
+|---|---|
+| `FPTCLOUD_TOKEN` | Token used by the FPT Cloud provider/API |
+| `FPTCLOUD_API_URL` | API base URL, usually `https://api.fptcloud.com` |
+| `FPTCLOUD_REGION` | Provider region, for example `VN/HAN` |
+| `FPTCLOUD_TENANT_NAME` | Tenant name |
+
+VPC settings:
+
+| Variable | Description |
+|---|---|
+| `HC_VPC_NAME` | Recommended lookup value; the runner resolves it to the provider VPC ID |
+| `HC_VPC_ID` | Set only when you already know the real provider UUID/ID |
+| `VPC_NAME`, `VPC_ID`, `VPC_IDS` | Legacy lookup fallbacks; prefer `[targets].vpcs` in `healthcheck.toml` for the ordered target list |
+
+Common compute/network settings:
+
+| Variable | Description |
+|---|---|
+| `HC_STORAGE_POLICY_ID` | Explicit storage policy, when discovery should be bypassed |
+| `HC_SUBNET_ID` | Explicit subnet for VM/security-group stages |
+| `HC_FLAVOR_NAME` | Target VM flavor |
+| `HC_*_IMAGE_NAME` | Optional OS image name overrides |
+| `HC_SUBNET_CIDR`, `HC_SUBNET_GATEWAY` | Subnet creation inputs |
+| `HC_ADDITIONAL_SUBNET_CIDR`, `HC_ADDITIONAL_SUBNET_GATEWAY` | Additional subnet creation inputs |
+| `HC_EXISTING_SUBNET_CIDRS` | Known existing CIDRs used to preflight-skip overlaps |
+
+S3/object-storage settings:
+
+| Variable | Description |
+|---|---|
+| `S3_ENDPOINT` | S3-compatible endpoint |
+| `S3_REGION` | Region used for SigV4 request signing, not Terraform bucket creation |
+| `S3_ACCESS_KEY` | Access key |
+| `S3_SECRET_KEY` | Secret key |
+| `HC_OBJECT_REGION` | Object-storage region used for bucket creation, for example `HN-01` |
+| `HC_ENABLED_OBJECT_REGIONS` | Comma-separated bucket creation regions |
+| `HC_OBJECT_BUCKET_PREFIX` | Temporary bucket prefix |
+| `HC_OBJECT_TEST_KEY` | Object key used for upload/delete validation |
+| `HC_OBJECT_TEST_BODY` | Test object body |
+
+Object-storage bucket region precedence:
+
+1. `HC_ENABLED_OBJECT_REGIONS`
+2. `HC_OBJECT_REGION`
+3. `[phases."object-storage.bucket"]` in `healthcheck.toml`
+
+`S3_REGION` is only used for S3 request signing. Do not rely on
+`S3_REGION=fpt` as the Terraform bucket region.
+
+## `healthcheck.toml` Configuration
+
+`healthcheck.toml` is runtime configuration by stage/phase. Override its path
+with `HC_CONFIG_TOML`. Precedence is:
+
+1. Environment variables
+2. `healthcheck.toml`
+3. Spec/code defaults
+
+Target VPC coverage should be configured as a list:
+
+```toml
+[targets]
+vpcs = [
+  "FCI-L1-HAN-VPC",
+  "FCI-L1-OPS-HAN",
+]
+```
+
+Today, the live runner resolves the first target for the current single-VPC
+path. The full list is intentionally stored in TOML so future
+`compute.select-vpc` work can iterate all target infrastructure without moving
+values out of `.env` again. If `VPC_IDS` or `VPC_ID` are set in the environment,
+they override `[targets].vpcs` for compatibility.
+
+Example compute settings:
+
+```toml
+[phases."compute.create-instance"]
+delete_after_create = false
+cleanup_on_quota_exceeded = false
+instances_per_apply = 1
+stop_on_quota_exceeded = true
+disk_gb = 40
+attach_subnet = true
+attach_security_group = false
+security_group_ids = []
+assign_floating_ip = false
+resize_after_create = false
+create_snapshot = false
+add_nic = false
+```
+
+Unsupported toggles such as `assign_floating_ip`, `resize_after_create`,
+`create_snapshot`, and `add_nic` must remain `false`. If enabled, the runner
+fails or skips before Terraform apply according to the configured constraints.
+
+Example object-storage settings:
+
+```toml
+[phases."object-storage.bucket"]
+region = "HN-01"
+bucket_prefix = "hc-object"
+test_key = "testfile.txt"
+test_body = "fptcloud health-check object storage probe"
+```
+
+Multiple bucket regions:
+
+```toml
+[phases."object-storage.bucket"]
+enabled_regions = ["HN-01", "HCM-01"]
+```
+
+## Common Commands
+
+Run object-storage end to end:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\run_health_checks.py --stage object-storage.bucket
+```
+
+This stage creates a temporary bucket with Terraform, checks the S3 endpoint,
+uploads an object, validates the object with HEAD, deletes the object, and
+destroys the bucket.
+
+Compile check:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python -m compileall src\healthcheck scripts\run_health_checks.py scripts\diagnose_health_inputs.py
+```
+
+Validate the spec:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\validate_health_check_spec.py
+```
+
+Run tests:
+
+```powershell
+py -3.11 -m pytest -q
+```
+
+If dependencies such as `structlog` are missing, reinstall the editable package:
+
+```powershell
+py -3.11 -m pip install -e ".[dev]"
+```
+
+## Queue/Producer CLI
+
+The `hc` CLI remains available for the queue/checklist path:
+
+```powershell
 $env:HC_USE_FAKEREDIS = "1"
-
-# 4. Dry-run: resolve the checklist and print the enqueue plan without touching anything
 hc producer run --checklist checklist.yml --run-id smoke-001 --dry-run
-
-# 5. Enqueue for real (state lives in-process for the lifetime of the process)
 hc producer run --checklist checklist.yml --run-id smoke-001
 hc queue stats
 hc queue peek
-
-# 6. Alternative: enqueue from a JSON health-check spec and write progress to log.html
-hc health-checks create --spec specs/health-check.json \
-    --run-id smoke-001 --tenant-id my-tenant
 ```
 
-> With `HC_USE_FAKEREDIS=1` the queue is ephemeral — state is lost when the process exits.
-> Use a real Redis for persistent or multi-process runs (see below).
-
-## Full-stack setup (with Redis and Postgres)
+With real Redis/Postgres:
 
 ```powershell
-# Start services
 docker compose up -d redis postgres
-
-# Apply DB schema
 $env:DATABASE_URL = "postgresql://hc:hc@localhost:5432/hc"
 hc db migrate
-
-# Enqueue and inspect
-hc producer run --checklist checklist.yml --run-id smoke-001
-hc queue stats
-hc queue peek
 ```
 
-## CLI reference
+## Extending Scenarios
 
-```
-hc queue stats                          # stream / PEL / DLQ / scheduled depths
-hc queue peek [--count N]               # preview next N tasks
-hc dlq list [--count N]                 # list dead-letter entries
-hc dlq replay <entry-id>                # reinject a DLQ entry with attempt=0
-hc db migrate                           # idempotent Postgres DDL apply
-hc producer run --checklist <path> \
-    --run-id <id> [--dry-run]           # load checklist.yml, enqueue first wave
-hc health-checks create --spec <path> \
-    --run-id <id> --tenant-id <id>      # create health-check jobs, write log.html
-```
+Follow the project rule: **spec first, implementation second**. A new health
+check scenario should be added in this order.
 
-## Environment variables
+1. Add or update the spec.
 
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `HC_CONSUMER_GROUP` | `hc-workers` | Redis consumer group name |
-| `HC_REAPER_IDLE_MS` | `300000` | PEL idle threshold before reclaim (ms) |
-| `HC_MAX_ATTEMPTS` | `3` | Max retry attempts before DLQ |
-| `FPTCLOUD_API_URL` | — | FPT Cloud API base URL |
-| `FPTCLOUD_REGION` | — | Region identifier |
-| `FPTCLOUD_TENANT_NAME` | — | Tenant name |
-| `FPTCLOUD_TOKEN` | — | API token (never written to disk) |
-| `VPC_ID` | — | VPC to deploy resources into |
-| `HC_USE_FAKEREDIS` | — | Set to `1` to use in-process fakeredis |
+   Define the new stage in `specs/health-check.json` with:
 
-## Running tests
+   - `id`: stable stage id, for example `object-storage.rotate-key`
+   - `automation_status`: usually `automated` only after implementation exists
+   - `required_inputs`: env/TOML/discovery values needed before execution
+   - `required_cloud_resources`: resources the stage may create or touch
+   - `validation_method`: how PASS/FAIL is proven
+   - `cleanup_behavior`: how temporary resources are destroyed or retained
+   - `dependency_stages`: stages that must pass first
+   - `failure_classification`: stable error category
+   - `safe_for_daily_run`: `true` only when cleanup and blast radius are clear
 
-```powershell
-# Unit tests — pure Python, no external services (uses fakeredis internally)
-py -3.11 -m pytest tests/unit -m unit -v
+   Also update `specs/03-TASKS.md`, `specs/04-TESTS.md`, and
+   `specs/CHANGELOG.md` when the change introduces a new behavior, new test, or
+   new operator-facing contract.
 
-# Integration tests — fakeredis fallback, still no Docker needed
-$env:HC_USE_FAKEREDIS = "1"
-py -3.11 -m pytest tests/integration -m integration -v
+2. Add runtime configuration.
 
-# Integration tests — real Redis (requires Docker or a local Redis install)
-docker compose up -d redis postgres
-py -3.11 -m pytest tests/integration -m integration -v
+   Put non-secret, per-phase options in `healthcheck.toml`:
 
-# Coverage gate (queue module must stay >= 85%)
-py -3.11 -m pytest tests/unit tests/integration --cov=src/hc/queue --cov-report=json
-py -3.11 scripts/check_coverage.py --min-queue 85
+   ```toml
+   [phases."my-new-stage"]
+   enabled = true
+   delete_after_create = true
+   concurrency = 1
+   ```
 
-# One file / one test
-py -3.11 -m pytest tests/unit/test_executor.py -v
-py -3.11 -m pytest tests/unit/test_dlq.py::test_name -v
-```
+   Keep secrets in `.env` only. If the setting is useful across environments,
+   document it in `.env.example` with an empty value and a short comment.
 
-Pytest markers: `unit` (no external deps), `integration` (Redis or fakeredis), `live` (real tenant, gated by `HC_LIVE_TESTS=1`).
+   Precedence should remain:
 
-## Extending the framework
+   1. Environment variable
+   2. `healthcheck.toml`
+   3. Spec/code default
 
-Adding a new FPT Cloud resource type requires **no Python changes** to the queue or
-checklist layers:
+3. Wire the runner plan.
 
-1. **Register the action** in `config/action_registry.yml` — maps the action name to
-   its executor, validators, and resource key template.
-2. **Add test cases** to `checklist.yml` using `spec.action: <name>`.
+   If the stage is Terraform-backed, add it to
+   `runner_plan.terraform_checks` in `specs/health-check.json`:
 
-The `ChecklistLoader` resolves `spec.action` at load time via the registry.
+   ```json
+   {
+     "stage": "my-new-stage",
+     "module": "my_module",
+     "vars": "my_vars_source",
+     "required_vars": ["name"],
+     "per_region": false
+   }
+   ```
 
-The `modules/` directory contains Terraform HCL for six resource types
-(`subnet`, `vm`, `disk`, `floating_ip`, `security_group`, `object_storage`), all
-pinned to `fpt-corp/fptcloud 0.3.50`. These are used by the Phase 5 executor path;
-the currently active pure-Python path calls the FPT Cloud API directly and does not
-invoke the Terraform CLI.
+   Then add the corresponding variable builder in
+   `src/healthcheck/stage_plan.py`.
 
-## Architecture overview
+4. Add implementation.
 
-```
-checklist.yml ──► ChecklistLoader ──► Producer ──► Redis Stream (hc:tasks)
-                                                          │
-                                                    Worker Pool          ← Phase 5
-                                                          │
-                                          ┌───────────────┴───────────────┐
-                                          ▼                               ▼
-                               FPT Cloud API                          Reaper
-                          (Python urllib.request)               (XCLAIM idle PEL)
-                                          │
-                                      Validator
-                                    (tf_state / in_vm / api_probe)
-                                          │
-                                 ┌────────┴────────┐
-                                 ▼                 ▼
-                           Postgres            hc:dlq
-                         (hc_attempts)     (poison msgs)
-                                 │
-                              Reporter
-                           (md / html / json)
-```
+   Choose the smallest implementation shape that matches the scenario:
 
-Resource provisioning and inventory reads hit the FPT Cloud REST API directly using
-Python's stdlib `urllib.request` — no Terraform binary is required in the current
-phases. The `TerraformExecutor` (`src/hc/executor/`) is scaffolded for Phase 5 workers
-but is not yet wired into a running pipeline.
+   - Terraform-only resource lifecycle: add or reuse a module under `modules/`.
+   - Terraform plus API/S3 validation: add a focused runner module under
+     `src/healthcheck/`, similar to `object_storage_runner.py`.
+   - Pure validation/discovery: implement a local validator/discovery stage and
+     avoid creating resources.
 
-Four Redis keys, one deployment:
+   Keep cleanup explicit. If the stage creates resources, it should destroy
+   them on success and attempt best-effort cleanup on failure unless the spec
+   says to retain them.
 
-| Key | Type | Role |
-|---|---|---|
-| `hc:tasks` | Stream | Main work queue, consumer group `hc-workers` |
-| `hc:dlq` | Stream | Dead-letter for exhausted / poison tasks |
-| `hc:dedup` | ZSet | Uniqueness index — `ZADD NX`, member = `task_id` |
-| `hc:scheduled` | ZSet | Retry backlog, score = wake time (epoch s) |
+5. Register checklist/action behavior when needed.
 
-Task ID is content-addressable: `sha256(run_id/tc_id/tenant_id/spec_hash)` — producer retries and resumable runs are no-ops.
+   For queue/checklist workflows, add the action to
+   `config/action_registry.yml`, then reference it from `checklist.yml`.
+   The live runner is driven by `specs/health-check.json`; the queue producer is
+   driven by `checklist.yml` plus the action registry.
 
-## Build status
+6. Verify.
 
-| Phase | Status | Scope |
-|---|---|---|
-| 0 — Foundation | done | Repo skeleton, CI, Pydantic models |
-| 1 — Queue core | done | Redis Streams, DLQ, Reaper, Scheduler |
-| 2 — Executor scaffolding | done | TerraformExecutor scaffold + ErrorClassifier (not yet active) |
-| 3 — Checklist DSL + Producer | done | ChecklistLoader, TemplateRenderer, DependencyResolver |
-| **4 — Validators** | **next** | `tf_state`, `in_vm`, `api_probe`, `manual` |
-| 5 — Worker integration | not started | End-to-end worker: pull → Python API call → validate → record |
-| 6 — Reporter | not started | MD / HTML / JSON verdict reports |
-| 7 — Hardening | not started | Gap items, distributed deploy, security scans |
+   Run:
 
-Phases 0–3 run entirely in Python with no Terraform CLI dependency. Phase 5 is where
-a running worker will invoke the executor against the live FPT Cloud API.
+   ```powershell
+   $env:PYTHONPATH = "src;scripts"
+   python scripts\validate_health_check_spec.py
+   python -m compileall src\healthcheck scripts\run_health_checks.py scripts\diagnose_health_inputs.py
+   python scripts\run_health_checks.py --stage my-new-stage
+   ```
 
-See `specs/03-TASKS.md` for detailed subtasks, Definitions of Done, and review gates.
+   If the stage touches real cloud resources, check
+   `runs/<run_id>/error_queue.json` and confirm the resource was destroyed or
+   intentionally retained with a logged reason.
 
-## Spec index
+## Scaling Configuration
 
-| File | Contents |
+Scale by adding config dimensions before adding code. Keep each dimension
+bounded and visible in logs.
+
+Common scale controls:
+
+| Need | Preferred config |
 |---|---|
-| `specs/00-ARCHITECTURE.md` | Component diagram, data flow, queue contract |
-| `specs/01-REQUIREMENTS.md` | Functional and non-functional requirements |
-| `specs/02-INFRASTRUCTURE.md` | Postgres schema, Terraform backend, Docker layout |
-| `specs/03-TASKS.md` | Phased task list with DoD and review gates |
-| `specs/04-TESTS.md` | End-to-end test table (TC-001 – TC-028) |
-| `specs/05-SPEC-GOVERNANCE.md` | How to amend the specs |
-| `specs/health-check.json` | JSON Schema for `checklist.yml` |
+| Define target VPC coverage | `[targets].vpcs = ["FCI-L1-HAN-VPC", "FCI-L1-OPS-HAN"]` |
+| Run object storage in many regions | `HC_ENABLED_OBJECT_REGIONS` or `enabled_regions` in `[phases."object-storage.bucket"]` |
+| Change temporary bucket naming | `HC_OBJECT_BUCKET_PREFIX` or `bucket_prefix` |
+| Create more than one VM per apply later | `instances_per_apply`, after the spec and module support it |
+| Keep or delete VM after validation | `delete_after_create` in `[phases."compute.create-instance"]`, or `HC_KEEP_INSTANCE` |
+| Add optional VM behavior | Add a TOML toggle plus a constraint; keep unsupported toggles fail-closed |
+| Select which OS image round runs first | `selection_order` in `[phases."compute.create-instance"]` |
+| Avoid subnet overlap | `HC_EXISTING_SUBNET_CIDRS` |
+
+When adding a scalable scenario, prefer this pattern:
+
+```toml
+[phases."my-new-stage"]
+enabled = true
+max_parallel = 1
+delete_after_create = true
+targets = ["target-a", "target-b"]
+
+[[phases."my-new-stage".constraints]]
+key = "max_parallel"
+op = "<="
+value = 1
+message = "This stage is serialized until quota-aware parallel execution is implemented."
+```
+
+Guidelines:
+
+- Default to `max_parallel = 1` for live cloud mutations.
+- Add concurrency only after quota, cleanup, and retry behavior are specified.
+- Log the effective config before Terraform/API mutation.
+- Never put provider tokens, S3 secret keys, generated passwords, or private
+  keys in TOML.
+- Prefer a new phase config key over hard-coding an operator choice.
+- Prefer a new stage id over changing the meaning of an existing stage.
+
+## Relevant Paths
+
+| Path | Role |
+|---|---|
+| `specs/health-check.json` | Stage catalog, runner plan, policy |
+| `healthcheck.toml` | Runtime phase config; not a secret store |
+| `.env.example` | Environment template |
+| `modules/` | Terraform modules |
+| `src/healthcheck/runner.py` | Live-run orchestrator |
+| `src/healthcheck/object_storage_runner.py` | Object-storage workflow |
+| `src/healthcheck/s3_client.py` | S3-compatible SigV4 probe client |
+| `runs/` | Per-run logs and evidence |
+
+## Safety Rules
+
+- Do not commit `.env`, tokens, access keys, secret keys, or passwords.
+- `healthcheck.toml` is not a secret store.
+- Every behavior change must be covered by the specs before implementation.
+- Resources created by health checks must have explicit cleanup behavior or a
+  clear retain reason in the logs.

@@ -18,7 +18,7 @@ from typing import Any
 from diagnose_health_inputs import diagnostics as input_diagnostics
 from diagnose_health_inputs import effective_config
 
-from healthcheck import classification, config, discovery, instance_runner, spec_loader, state
+from healthcheck import classification, config, discovery, instance_runner, object_storage_runner, spec_loader, stage_plan, state
 from healthcheck import terraform_executor as tf
 from healthcheck.logging import emit, now, queue_error, queue_pending, safe_name
 from healthcheck.models import CandidateState, Check
@@ -301,6 +301,9 @@ def execute(check: Check) -> None:
         return
     if check.name == state.INSTANCE_CREATE_STAGE:
         instance_runner.execute_instance_create(check)
+        return
+    if check.name == "object-storage.bucket":
+        object_storage_runner.execute_object_storage(check)
         return
 
     resources = [f"module.{check.module}"]
@@ -712,131 +715,16 @@ def checks(stage_filter: str | None = None) -> list[Check]:
     instance_runner.select_instance_round_stage(spec.get(state.INSTANCE_ROUND_SELECT_STAGE))
     instance_runner.validate_instance_network_stage(spec.get(state.INSTANCE_NETWORK_VALIDATE_STAGE))
 
-    instance_id = config.env("HC_INSTANCE_ID")
-    backup_regions = [
-        value.strip()
-        for value in config.env(
-            "HC_ENABLED_OBJECT_REGIONS", config.env("HC_OBJECT_REGION", "")
-        ).split(",")
-        if value.strip()
-    ]
-    additional_subnet_vars = {
-        "name": f"hc-extra-net-{suffix}",
-        "cidr": config.env("HC_ADDITIONAL_SUBNET_CIDR"),
-        "gateway_ip": config.env("HC_ADDITIONAL_SUBNET_GATEWAY"),
-        "type": config.env("HC_SUBNET_TYPE", "NAT_ROUTED"),
-        "vpc_id": vpc_id,
-    }
-    additional_subnet_check: Check | None = None
-    if "network.additional-subnet" in spec:
-        additional_subnet_check = spec_loader.check_from_spec(
-            spec["network.additional-subnet"],
-            module="subnet",
-            vars=additional_subnet_vars,
-            required_vars=("vpc_id", "cidr", "gateway_ip"),
-        )
-
-    candidate_checks: list[Check | None] = [
-        spec_loader.check_from_spec(
-            spec[state.INSTANCE_CREATE_STAGE],
-            module="vm",
-            vars=dict(state.instance_validation.get("vars") or {}),
-            required_vars=("instances",),
-        )
-        if state.INSTANCE_CREATE_STAGE in spec
-        else None,
-        spec_loader.check_from_spec(
-            spec[state.SUBNET_CREATE_STAGE],
-            module="subnet",
-            vars=create_subnet_vars,
-            required_vars=("vpc_id",),
-        )
-        if state.SUBNET_CREATE_STAGE in spec
-        else None,
-        spec_loader.check_from_spec(
-            spec["network.security-group"],
-            module="security_group",
-            vars={
-                "name": f"hc-sg-{suffix}",
-                "vpc_id": vpc_id,
-                "type": "ACL",
-                "apply_to": [subnet_id] if subnet_id else [],
-                "rules": [
-                    {
-                        "direction": "INGRESS",
-                        "protocol": "TCP",
-                        "port_range": "22",
-                        "sources": [config.env("HC_ADMIN_CIDR", "0.0.0.0/0")],
-                        "action": "ALLOW",
-                        "description": "health check ssh",
-                    },
-                    {
-                        "direction": "INGRESS",
-                        "protocol": "TCP",
-                        "port_range": "3389",
-                        "sources": [config.env("HC_ADMIN_CIDR", "0.0.0.0/0")],
-                        "action": "ALLOW",
-                        "description": "health check rdp",
-                    },
-                ],
-            },
-            required_vars=("vpc_id", "apply_to"),
-        )
-        if "network.security-group" in spec
-        else None,
-        spec_loader.check_from_spec(
-            spec["compute.add-disk"],
-            module="disk",
-            vars={
-                "name": f"hc-disk-{suffix}",
-                "size_gb": int(config.env("HC_DISK_SIZE_GB", "40")),
-                "vpc_id": vpc_id,
-                "storage_policy_id": storage_policy,
-                "type": config.env("HC_DISK_TYPE", "EXTERNAL"),
-                "instance_id": instance_id or None,
-            },
-            required_vars=("vpc_id", "storage_policy_id"),
-        )
-        if "compute.add-disk" in spec
-        else None,
-        additional_subnet_check,
-    ]
-    base_checks = [check for check in candidate_checks if check]
-
-    if not backup_regions:
-        backup_stage = spec.get("object-storage.bucket")
-        backup_checks = []
-        if backup_stage:
-            check = spec_loader.check_from_spec(
-                backup_stage,
-                module="object_storage",
-                vars={"region_name": "", "vpc_id": vpc_id},
-                required_vars=("vpc_id", "region_name"),
-            )
-            if check:
-                backup_checks.append(check)
-    else:
-        backup_checks = [
-            check
-            for region in backup_regions
-            for check in [
-                spec_loader.check_from_spec(
-                    spec["object-storage.bucket"],
-                    module="object_storage",
-                    vars={
-                        "bucket_name": f"hc-backup-{region.lower().replace('-', '')}-{suffix}",
-                        "region_name": region,
-                        "vpc_id": vpc_id,
-                        "acl": None,
-                        "versioning": "Enabled",
-                    },
-                    required_vars=("vpc_id",),
-                    stop_group_on_success="backup",
-                )
-            ]
-            if "object-storage.bucket" in spec and check
-        ]
-    return base_checks + backup_checks
+    backup_regions = config.object_storage_regions()
+    return stage_plan.build_terraform_checks(
+        spec=spec,
+        suffix=suffix,
+        vpc_id=vpc_id,
+        subnet_id=subnet_id,
+        storage_policy=storage_policy,
+        create_subnet_vars=create_subnet_vars,
+        backup_regions=backup_regions,
+    )
 
 
 # ── Run / CLI ─────────────────────────────────────────────────────────────────
@@ -867,6 +755,16 @@ def run(stage_filter: str | None = None) -> None:
             f"dotenv_loaded_count={len(config.DOTENV_RESULT['loaded'])}; "
             f"dotenv_skipped_existing_count={len(config.DOTENV_RESULT['skipped_existing'])}; "
             f"{config.env_presence_report()}"
+        ),
+    )
+    runtime_config = config.RUNTIME_CONFIG_RESULT
+    emit(
+        "runtime-config",
+        "failed" if runtime_config.get("error") else "done",
+        (
+            f"path={runtime_config.get('path')}; found={runtime_config.get('found')}; "
+            f"loaded={runtime_config.get('loaded')}; "
+            f"error={runtime_config.get('error') or '<none>'}"
         ),
     )
     diagnostic_data = input_diagnostics()

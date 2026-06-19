@@ -87,9 +87,8 @@ actions:
     default_depends_on_actions: [create_backup]
 
   connect_s3:
-    module: null
-    executor: api_fallback
+    module: object_storage
+    executor: s3_client
     validators: [api_probe]
     resource_key_template: "s3:${vars.bucket_name}"
-    gap: provider_resource_missing
     default_depends_on_actions: [create_bucket]

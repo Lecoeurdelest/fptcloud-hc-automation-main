@@ -26,11 +26,7 @@ from healthcheck.spec_loader import runnable_spec, spec_preflight
 
 # ── VPC context ───────────────────────────────────────────────────────────────
 def vpc_lookup_key() -> str:
-    values = [
-        value.strip()
-        for value in (config.env("VPC_IDS") or config.env("VPC_ID")).split(",")
-        if value.strip()
-    ]
+    values = config.target_vpcs()
     return (
         config.env("HC_VPC_NAME")
         or config.env("VPC_NAME")
@@ -70,14 +66,14 @@ def vpc_diagnostics_message(prefix: str = "VPC resolution") -> str:
 
 
 def target_vpc_entries() -> list[tuple[str, str]]:
-    """Return ordered list of (vpc_name, raw_entry) pairs from VPC_IDS env var.
+    """Return ordered list of (vpc_name, raw_entry) target VPC pairs.
 
-    The raw_entry is the VPC name/identifier used for provider discovery.
+    The raw_entry is the VPC name/identifier used for provider discovery. Env
+    VPC_IDS/VPC_ID override healthcheck.toml [targets].vpcs for compatibility.
     Returns at least the primary VPC from vpc_lookup_key() so the single-VPC
-    path is preserved when VPC_IDS has only one entry.
+    path is preserved when only one entry is configured.
     """
-    raw = config.env("VPC_IDS") or config.env("VPC_ID") or ""
-    entries = [v.strip() for v in raw.split(",") if v.strip()]
+    entries = config.target_vpcs()
     if not entries:
         primary = vpc_lookup_key()
         return [(primary, primary)] if primary else []

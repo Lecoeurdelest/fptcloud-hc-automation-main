@@ -98,6 +98,7 @@ HC_REAPER_IDLE_MS=300000
 HC_MAX_ATTEMPTS=3
 HC_LOG_LEVEL=INFO
 HC_RUN_ID=<auto>
+HC_CONFIG_TOML=healthcheck.toml
 ```
 
 ## 4. Secrets handling
