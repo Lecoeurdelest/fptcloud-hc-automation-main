@@ -20,6 +20,8 @@ for validation, and writes results to `runs/<run_id>/log.json` and `log.html`.
   are not required for the live health-check runner.
 - Valid FPT Cloud credentials in `.env`.
 - S3 credentials when running object-storage checks.
+- `paramiko` and `pywinrm` are installed through the Python package metadata
+  and are used by the Phase-4 `InVMValidator` for SSH/WinRM probes.
 
 ## Quick Start
 
@@ -400,9 +402,23 @@ $env:PYTHONPATH = "src"
 py -3.11 -m pytest tests\unit\test_validator.py -q
 ```
 
-The validator tests require Python 3.11 because the project uses
-`enum.StrEnum`. Running them with the system `python` may fail if that points to
-Python 3.9 or older.
+The project target runtime is still Python `>=3.11,<3.12`. A small compatibility
+shim exists for local Python 3.9 test runs, so the validator suite can also be
+run with the system `python` when the dependencies are already installed:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m pytest tests\unit\test_validator.py -q
+```
+
+Latest local validator run:
+
+```text
+20 passed, 1 warning
+```
+
+The warning may appear on older pytest environments that do not recognize the
+`asyncio_mode` option; it does not affect the validator unit suite.
 
 ## Queue/Producer CLI
 
@@ -426,7 +442,7 @@ hc db migrate
 
 ## Validation Layer
 
-The queue/checklist path has a reusable Phase-4 validator scaffold under
+The queue/checklist path has a reusable Phase-4 validator layer under
 `src/hc/validator/`. It is separate from the live-runner service-specific
 validation in `src/healthcheck/`.
 
@@ -434,10 +450,10 @@ Current validator capabilities:
 
 | Validator | Status | Notes |
 |---|---|---|
-| `TFStateValidator` | Scaffolded | Supports resource paths such as `fptcloud_subnet.this.cidr`, `equals`, and `contains` |
+| `TFStateValidator` | Implemented | Supports resource dot paths, basic JSONPath-style paths, `equals`, `contains`, `regex_match`, `present`, and `absent` |
 | `ManualValidator` | Implemented | Returns `INCONCLUSIVE` with the checklist note |
-| `InVMValidator` | Scaffolded | Uses a pluggable probe runner today; real SSH/WinRM transport is future work |
-| `APIProbeValidator` | Scaffolded | Uses a pluggable probe runner or a basic HTTP GET probe; retry/TLS policy is future work |
+| `InVMValidator` | Implemented | Runs SSH probes through `paramiko` and Windows probes through `pywinrm`; supports `probe`/`command`, `exit_code`, `stdout_contains`, and `file_exists` |
+| `APIProbeValidator` | Implemented | Supports HTTP/HTTPS status/body checks, retry, timeout, and TLS verification configuration |
 | `CompositeValidator` | Implemented | Supports AND, OR, and NOT evaluation of multiple assertions |
 
 Example:
@@ -465,9 +481,38 @@ result = TFStateValidator().evaluate(task, state, assertion)
 print(result.verdict)
 ```
 
+Example in-VM assertions:
+
+```yaml
+expected:
+  - type: in_vm
+    transport: winrm
+    probe: "echo ok"
+    contains: "ok"
+    exit_code: 0
+
+  - type: in_vm
+    transport: ssh
+    probe: "lsblk -b -o SIZE -d -n /dev/vda"
+    contains: "85899345920"
+    exit_code: 0
+
+  - type: in_vm
+    transport: ssh
+    file_exists: "/home/ubuntu/Desktop/testbackup-2026-06-19.txt"
+```
+
+Connection fields can be provided directly on an assertion (`host`,
+`host_path`, `port`, `username`, `password`, `private_key_path`) or derived
+from Terraform state when available. For Windows, unreachable WinRM fails the
+boot/login DoD path; for Linux SSH command probes, connection timeout is treated
+as `INCONCLUSIVE` so the report can distinguish missing evidence from a
+confirmed failed assertion.
+
 `ExpectedAssertion` preserves checklist-specific probe fields such as `check`,
-`bucket`, `key`, `url`, and `note`, so action-specific validators can evolve
-without losing data during checklist loading.
+`bucket`, `key`, `url`, `note`, `method`, `timeout_seconds`, `retries`, and
+`tls_verify`, so action-specific validators can evolve without losing data
+during checklist loading.
 
 ## Extending Scenarios
 
@@ -621,7 +666,8 @@ Guidelines:
 | `src/healthcheck/runner.py` | Live-run orchestrator |
 | `src/healthcheck/object_storage_runner.py` | Object-storage workflow |
 | `src/healthcheck/s3_client.py` | S3-compatible SigV4 probe client |
-| `src/hc/validator/core.py` | Queue/checklist validator scaffold |
+| `src/hc/compat.py` | Python-version compatibility helpers for local test runs |
+| `src/hc/validator/core.py` | Queue/checklist Phase-4 validator layer |
 | `tests/unit/test_validator.py` | Validator unit tests |
 | `runs/` | Per-run logs and evidence |
 
