@@ -32,6 +32,23 @@ no spec, no implementation.
   environment overrides.
 - **Rationale:** `no-spec-no-implement`
 
+### Amendment 5 — Provider-observable lifecycle events
+- **Files:** [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md), [health-check.json](health-check.json)
+- **Summary:** Promoted `compute.select-vpc` and
+  `compute.validate-instance-active` from future placeholders to automated
+  live-run stages. The runner now emits `vpc.selected` after VPC discovery and
+  `instance.validated` after successful provider-observable instance creation
+  evidence is recorded. Guest OS login remains manual verification.
+- **Rationale:** `no-spec-no-implement`
+
+### Amendment 6 — Phase-4 validator scaffold
+- **Files:** [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md)
+- **Summary:** Added reusable validator primitives for TF-state assertions,
+  manual INCONCLUSIVE verdicts, pluggable in-VM/API probes, and composite
+  AND/OR/NOT evaluation. Remaining transport, retry, TLS, and full JSONPath
+  work stays marked in progress.
+- **Rationale:** `phase-4-implementation`
+
 ### Amendment 2 — S3 object-storage automation
 - **Files:** [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md), [health-check.json](health-check.json)
 - **Summary:** Converted the S3 endpoint checkpoint from a gap/manual item to

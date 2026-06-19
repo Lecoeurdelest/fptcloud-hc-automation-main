@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Verdict(StrEnum):
@@ -15,11 +15,19 @@ class Verdict(StrEnum):
 
 
 class ExpectedAssertion(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     type: Literal["tf_state", "in_vm", "api_probe", "manual"]
     path: str | None = None
     equals: str | None = None
     contains: str | None = None
     probe: str | None = None
+    check: str | None = None
+    bucket: str | None = None
+    key: str | None = None
+    note: str | None = None
+    url: str | None = None
+    status_code: int | None = None
 
 
 class Checkpoint(BaseModel):

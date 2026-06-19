@@ -2370,8 +2370,8 @@
       "id": "compute.select-vpc",
       "manual_check_item": "Select target VPC for the current rolling round",
       "purpose": "Iterate TARGET_VPCS in round-robin order and pick the current VPC for the rolling lifecycle.",
-      "automation_status": "not_implemented",
-      "implementation_note": "VPC iteration exists internally within the runner but this named stage is not implemented. The vpc.selected event is not currently emitted. The runner iterates VPCs internally without surfacing a named stage event. This stage must remain not_implemented until vpc.selected emission is added to the Python runner.",
+      "automation_status": "automated",
+      "implementation_note": "The current runner emits vpc.selected for the resolved effective VPC. Multi-VPC iteration remains single-VPC-path today and will expand to the full target list in a later rolling lifecycle step.",
       "required_inputs": [
         "effective_vpc_id"
       ],
@@ -2383,10 +2383,9 @@
       "required_cloud_resources": [
         "Existing VPC"
       ],
-      "expected_result": "Future: Records the selected VPC name and effective_vpc_id for the round and emits vpc.selected. Per-VPC discovery (subnet, storage policy, flavor, image) runs downstream for the selected VPC.",
-      "validation_method": "Future: Resolve TARGET_VPCS from healthcheck.toml [targets].vpcs, with VPC_IDS/VPC_ID as env overrides. For each VPC in order, emit vpc.selected with vpc_name and effective_vpc_id, then run the existing per-VPC discovery and create pipeline. Do not proceed to the next VPC until the current VPC single VM is created, validated, and kept (or recorded quota-blocked).",
-      "report_events": [],
-      "report_events_future": [
+      "expected_result": "Records the selected VPC name and effective_vpc_id for the current single-VPC path and emits vpc.selected.",
+      "validation_method": "Resolve TARGET_VPCS from healthcheck.toml [targets].vpcs, with VPC_IDS/VPC_ID as env overrides. Emit vpc.selected for the resolved effective VPC. Full multi-VPC iteration is intentionally deferred until the rolling lifecycle supports per-VPC execution.",
+      "report_events": [
         "vpc.selected"
       ],
       "failure_classifications": [
@@ -2411,8 +2410,8 @@
       "id": "compute.validate-instance-active",
       "manual_check_item": "Wait for ACTIVE and validate created Compute Instance",
       "purpose": "After each create, wait until the instance reaches the ACTIVE/POWERED_ON equivalent and validate provider-observable health before the next image.",
-      "automation_status": "not_implemented",
-      "implementation_note": "The Terraform provider resource wait implicitly handles POWERED_ON/POWERED_OFF state polling during apply. There is no separate Python validation poll, no instance.validated event emission, no network attachment validation, no IP assignment check, and no metadata validation in the current implementation. Instance state errors surfaced by Terraform during apply are classified as instance_provider_error (non-quota) and handled per INSTANCE_PROVIDER_ERROR_BEHAVIOR. This stage must remain not_implemented until the named Python validation stage and instance.validated emission are added.",
+      "automation_status": "automated",
+      "implementation_note": "The Terraform provider resource wait and runner readiness check are the provider-observable validation source. The Python runner emits instance.validated after successful create results are recorded. Guest OS login remains manual_verification_required until an in-guest probe is specced.",
       "required_inputs": [
         "effective_vpc_id",
         "effective_subnet_id"
@@ -2424,10 +2423,9 @@
       "required_cloud_resources": [
         "Compute Instance created by this run"
       ],
-      "expected_result": "Future: Reports instance status, network attachment (vpc_id+subnet_id), IP assignment (private_ip; public_ip when configured), password generated/redacted, metadata (name, hostname, flavor, storage_policy_id), and boot verification state, then emits instance.validated.",
-      "validation_method": "Future: Poll fptcloud_instance/terraform show until status is the ACTIVE/POWERED_ON equivalent up to INSTANCE_ACTIVE_TIMEOUT_S at INSTANCE_ACTIVE_POLL_S intervals. Validate status, network attachment, IP assignment, password generation policy, and metadata. Boot success is report-only (manual_verification_required) and classified instance_boot_unverified as a warning, not a failure, until an in-guest probe is specced. Non-quota validation failure classifies instance_validation_failed and the instance is retained.",
-      "report_events": [],
-      "report_events_future": [
+      "expected_result": "Reports provider-observable instance creation/readiness evidence, network attachment context, password generated/redacted status, retained instance IDs, and boot verification policy, then emits instance.validated.",
+      "validation_method": "Use the successful compute.create-instance result, created-instances.json, Terraform provider apply/readiness outcome, and resolved runtime context. Validate that at least one instance was successfully created or recorded with an instance ID. Boot success remains manual_verification_required until an in-guest probe is specced. Non-quota validation failure classifies instance_validation_failed and the instance is retained.",
+      "report_events": [
         "instance.validated"
       ],
       "failure_classifications": [

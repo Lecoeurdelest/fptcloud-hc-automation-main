@@ -260,22 +260,30 @@ queue, honoring dependencies.
 
 ### Subtasks
 
-- [ ] **P4.T1** — `Validator` protocol: `evaluate(task, tf_state) -> Verdict`.
-- [ ] **P4.T2** — `TFStateValidator`: JSONPath-based assertions against
+- [x] **P4.T1** — `Validator` protocol: `evaluate(task, tf_state) -> Verdict`.
+- [~] **P4.T2** — `TFStateValidator`: JSONPath-based assertions against
       `terraform show -json` output. Supports `equals`, `contains`,
       `regex_match`, `present`, `absent`.
-- [ ] **P4.T3** — `InVMValidator`: SSH (paramiko) for Linux, WinRM (pywinrm)
+- [~] **P4.T3** — `InVMValidator`: SSH (paramiko) for Linux, WinRM (pywinrm)
       for Windows. Connection params derived from TF state. Probes: `command`,
       `exit_code`, `stdout_contains`, `file_exists`.
-- [ ] **P4.T4** — `APIProbeValidator`: HTTP/HTTPS requests with retries, TLS
+- [~] **P4.T4** — `APIProbeValidator`: HTTP/HTTPS requests with retries, TLS
       verification, expected status code / body match.
-- [ ] **P4.T5** — `CompositeValidator`: AND/OR/NOT of sub-validators; the
+- [x] **P4.T5** — `CompositeValidator`: AND/OR/NOT of sub-validators; the
       default for a checkpoint with multiple `expected` blocks is AND.
-- [ ] **P4.T6** — `ManualValidator`: marks a gap-item task as INCONCLUSIVE
+- [x] **P4.T6** — `ManualValidator`: marks a gap-item task as INCONCLUSIVE
       with a clear "human action required" note, but does **not** count as a
       hard fail in the report's success rate.
-- [ ] **P4.T7** — Tests: each validator independently, plus a composite
+- [~] **P4.T7** — Tests: each validator independently, plus a composite
       failure path. Mock SSH/WinRM/HTTP at the library boundary.
+
+> Implementation note (2026-06-19): `src/hc/validator/core.py` now provides
+> the Phase-4 protocol, validation result, TF-state path assertions,
+> pluggable in-VM/API probe validators, manual INCONCLUSIVE verdicts, and
+> composite AND/OR/NOT evaluation. `ExpectedAssertion` preserves checklist
+> probe fields such as `check`, `bucket`, `key`, `url`, and `note`. Remaining
+> work: full JSONPath syntax, real SSH/WinRM transports, API retry/TLS policy,
+> and running pytest under Python 3.11 with dependencies installed.
 
 ### DoD
 
@@ -334,6 +342,10 @@ provisioned via Terraform, validated, and recorded — for one TC.
       config path/status, and fail closed when TOML requests an unsupported
       phase behavior such as floating IP, resize, snapshot, or additional NIC.
       Implementation is present; dedicated tests are still pending.
+- [~] **P5.T12** — Provider-observable lifecycle events: emit `vpc.selected`
+      after VPC discovery and `instance.validated` after a successful
+      `compute.create-instance` result. Guest OS login/boot proof remains
+      `manual_verification_required` until an in-guest probe is specced.
 
 ### DoD
 
@@ -347,6 +359,8 @@ provisioned via Terraform, validated, and recorded — for one TC.
       check confirms cleanup after success or failure.
 - [~] Runtime TOML phase config is reflected in `log.json`/`log.html`, and
       unsupported toggles are blocked before Terraform apply.
+- [~] Live runner emits `vpc.selected` and provider-observable
+      `instance.validated` events for the current single-VPC path.
 
 > Implementation note (2026-06-12): `scripts/run_health_checks.py` is the
 > current live-run harness while the full Phase 5 worker is still open. It

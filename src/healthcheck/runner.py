@@ -301,6 +301,9 @@ def execute(check: Check) -> None:
         return
     if check.name == state.INSTANCE_CREATE_STAGE:
         instance_runner.execute_instance_create(check)
+        instance_runner.validate_instance_active_stage(
+            spec_loader.load_spec().get("compute.validate-instance-active")
+        )
         return
     if check.name == "object-storage.bucket":
         object_storage_runner.execute_object_storage(check)
@@ -640,6 +643,7 @@ def checks(stage_filter: str | None = None) -> list[Check]:
     config_eff = effective_config()
     discovery.discover_vpc(spec.get(state.VPC_DISCOVERY_STAGE))
     vpc_id = discovery.update_vpc_context()["effective_vpc_id"]
+    instance_runner.select_vpc_stage(spec.get("compute.select-vpc"))
     storage_policy = config_eff["storage_policy_id"]
     subnet_id = config_eff["subnet_id"]
     state.run_context["effective_storage_policy_id"] = storage_policy

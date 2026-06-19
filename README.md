@@ -207,6 +207,8 @@ Important notes:
 - "Partially automated" is intentionally not reported as full PASS for the
   original manual expectation when the case requires proof inside the guest OS
   or a browser.
+- VM create runs now emit provider-observable `vpc.selected` and
+  `instance.validated` events. Guest OS login remains manual verification.
 - Object-storage is the most complete current end-to-end workflow: create
   bucket, S3 HEAD bucket, PUT object, HEAD object, DELETE object, and destroy
   bucket.

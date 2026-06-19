@@ -147,24 +147,24 @@ Run with: `make test-unit` (pytest marker: `@pytest.mark.unit`)
 
 ### Validators (`src/hc/validator/`) — target ≥ 80%
 
-- [ ] **T-0401** — `TFStateValidator` `equals` assertion passes on match (phase: P4.T2)
-- [ ] **T-0402** — `TFStateValidator` `equals` assertion fails on mismatch (phase: P4.T2)
-- [ ] **T-0403** — `TFStateValidator` `contains` assertion (phase: P4.T2)
+- [~] **T-0401** — `TFStateValidator` `equals` assertion passes on match (phase: P4.T2)
+- [~] **T-0402** — `TFStateValidator` `equals` assertion fails on mismatch (phase: P4.T2)
+- [~] **T-0403** — `TFStateValidator` `contains` assertion (phase: P4.T2)
 - [ ] **T-0404** — `TFStateValidator` `regex_match` assertion (phase: P4.T2)
 - [ ] **T-0405** — `TFStateValidator` `present` / `absent` assertions (phase: P4.T2)
-- [ ] **T-0406** — `TFStateValidator` returns `FAIL` with JSONPath that doesn't exist (phase: P4.T2)
-- [ ] **T-0407** — `InVMValidator` SSH: command returns expected stdout (phase: P4.T3)
+- [~] **T-0406** — `TFStateValidator` returns `FAIL` with JSONPath that doesn't exist (phase: P4.T2)
+- [~] **T-0407** — `InVMValidator` SSH: command returns expected stdout (phase: P4.T3)
 - [ ] **T-0408** — `InVMValidator` SSH: connection timeout → `INCONCLUSIVE` (phase: P4.T3)
 - [ ] **T-0409** — `InVMValidator` WinRM: command returns expected stdout (phase: P4.T3)
 - [ ] **T-0410** — `InVMValidator` WinRM: auth failure → `FAIL` (phase: P4.T3)
 - [ ] **T-0411** — `InVMValidator` `file_exists` probe (phase: P4.T3)
-- [ ] **T-0412** — `APIProbeValidator` HTTP 200 + body match → `PASS` (phase: P4.T4)
+- [~] **T-0412** — `APIProbeValidator` HTTP 200 + body match → `PASS` (phase: P4.T4)
 - [ ] **T-0413** — `APIProbeValidator` HTTP 503 → retry then `FAIL` (phase: P4.T4)
 - [ ] **T-0414** — `APIProbeValidator` TLS verify failure → `FAIL` (phase: P4.T4)
-- [ ] **T-0415** — `CompositeValidator` AND: all pass → `PASS` (phase: P4.T5)
-- [ ] **T-0416** — `CompositeValidator` AND: one fail → `FAIL` (phase: P4.T5)
-- [ ] **T-0417** — `CompositeValidator` OR: one pass → `PASS` (phase: P4.T5)
-- [ ] **T-0418** — `ManualValidator` always returns `INCONCLUSIVE` with note (phase: P4.T6)
+- [~] **T-0415** — `CompositeValidator` AND: all pass → `PASS` (phase: P4.T5)
+- [~] **T-0416** — `CompositeValidator` AND: one fail → `FAIL` (phase: P4.T5)
+- [~] **T-0417** — `CompositeValidator` OR: one pass → `PASS` (phase: P4.T5)
+- [~] **T-0418** — `ManualValidator` always returns `INCONCLUSIVE` with note (phase: P4.T6)
 
 ### Reporter (`src/hc/reporter/`) — target ≥ 75%
 
@@ -240,6 +240,7 @@ Run with: `make test-integration` (pytest marker: `@pytest.mark.integration`)
 - [ ] **T-1215** — Runtime TOML structured constraints fail before Terraform apply and report the configured message in `log.json`/`log.html` (phase: P5.T11)
 - [ ] **T-1216** — Unsupported TOML toggles (`assign_floating_ip`, `resize_after_create`, `create_snapshot`, `add_nic`) skip/fail before Terraform apply rather than reporting PASS (phase: P5.T11)
 - [ ] **T-1217** — `delete_after_create=true` destroys only the current-run instance workspace after successful readiness validation and records cleanup events (phase: P5.T11)
+- [ ] **T-1218** — Live runner emits `vpc.selected` after VPC discovery and `instance.validated` after a successful provider-observable instance create/readiness result (phase: P5.T12)
 
 ### Database integration
 

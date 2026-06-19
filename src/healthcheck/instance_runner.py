@@ -223,6 +223,45 @@ def stage_ok_for(stage: str) -> bool:
     return state.stage_status.get(stage) in {"done", "passed", "ready"}
 
 
+def select_vpc_stage(stage) -> None:
+    if not stage:
+        return
+    ok, reason = runnable_spec(stage)
+    if not ok:
+        emit(stage.id, "skipped", reason, ["vpc-selection"])
+        return
+    ctx = discovery.update_vpc_context()
+    effective_vpc_id = str(ctx.get("effective_vpc_id") or "")
+    vpc_name = str(ctx.get("vpc_name") or "")
+    target_vpcs = discovery.target_vpc_entries()
+    if not effective_vpc_id:
+        emit(
+            stage.id,
+            "skipped",
+            (
+                "Classification: vpc_selection_failed; "
+                f"target_vpcs={json.dumps([entry for entry, _raw in target_vpcs])}; "
+                f"{discovery.vpc_diagnostics_message()}"
+            ),
+            ["vpc-selection"],
+        )
+        return
+    state.stage_status[stage.id] = "done"
+    emit(
+        stage.id,
+        "done",
+        (
+            "vpc.selected; "
+            f"vpc_name={vpc_name or '<unset>'}; "
+            f"effective_vpc_id={effective_vpc_id}; "
+            f"vpc_id_source={ctx.get('vpc_id_source') or 'unresolved'}; "
+            f"target_vpcs={json.dumps([entry for entry, _raw in target_vpcs])}; "
+            "current_vpc_index=0; multi_vpc_iteration=single_vpc_path"
+        ),
+        ["vpc.selected", effective_vpc_id],
+    )
+
+
 # ── Quota reports (optimistic only) ───────────────────────────────────────────
 def not_available_quota_report(target_disk_size: int | None = None) -> dict[str, Any]:
     disk_size = target_disk_size if target_disk_size is not None else config.root_disk_size()[0]
@@ -1476,6 +1515,97 @@ def _execute_one_image_attempt(
         resources=list(current),
         context=context,
         failed_instance_id=failed_instance_id,
+    )
+
+
+def validate_instance_active_stage(stage) -> None:
+    if not stage:
+        return
+    ok, reason = runnable_spec(stage)
+    if not ok:
+        emit(stage.id, "skipped", reason, ["instance-validation"])
+        return
+    blocked = [
+        name for name in stage.dependency_stages if name != stage.id and not stage_ok_for(name)
+    ]
+    if blocked:
+        emit(
+            stage.id,
+            "skipped",
+            f"Classification: instance_validation_failed; Blocked by incomplete dependency stage(s): {', '.join(blocked)}",
+            ["instance-validation"],
+        )
+        return
+
+    round_info = dict(state.run_context.get("selected_instance_round") or {})
+    successful_images = [str(label) for label in round_info.get("successful_images") or []]
+    created_path = state.RUN_ROOT / state.INSTANCE_CREATE_STAGE / "created-instances.json"
+    created_records: list[dict[str, Any]] = []
+    if created_path.exists():
+        try:
+            raw_records = json.loads(created_path.read_text(encoding="utf-8"))
+            if isinstance(raw_records, list):
+                created_records = [dict(item) for item in raw_records if isinstance(item, dict)]
+        except (OSError, json.JSONDecodeError) as exc:
+            emit(
+                stage.id,
+                "skipped",
+                f"Classification: instance_validation_failed; cannot_read_created_instances={exc}",
+                [str(created_path)],
+            )
+            return
+
+    if not successful_images and not created_records:
+        emit(
+            stage.id,
+            "skipped",
+            (
+                "Classification: instance_validation_failed; "
+                "no successful instance create result is available; "
+                f"run_status={state.run_context.get('run_status') or '<unset>'}; "
+                f"failed_image={round_info.get('failed_image') or '<none>'}; "
+                f"failure_reason={round_info.get('failure_reason') or '<none>'}"
+            ),
+            ["instance-validation"],
+        )
+        return
+
+    missing_ids = [
+        str(record.get("os_label") or "<unknown>")
+        for record in created_records
+        if not str(record.get("instance_id") or "")
+    ]
+    if missing_ids:
+        emit(
+            stage.id,
+            "skipped",
+            (
+                "Classification: instance_validation_failed; "
+                f"missing_instance_ids={json.dumps(missing_ids)}"
+            ),
+            ["instance-validation"],
+        )
+        return
+
+    diagnostics = dict(state.instance_validation.get("diagnostics") or {})
+    state.stage_status[stage.id] = "done"
+    emit(
+        stage.id,
+        "done",
+        (
+            "instance.validated; "
+            "provider_observable_validation=True; "
+            "boot_probe=manual_verification_required; "
+            f"successful_images={json.dumps(successful_images, sort_keys=True)}; "
+            f"created_instances={json.dumps(created_records, sort_keys=True)}; "
+            f"effective_vpc_id={state.run_context.get('effective_vpc_id') or '<unset>'}; "
+            f"effective_subnet_id={state.run_context.get('effective_subnet_id') or '<unset>'}; "
+            f"effective_storage_policy_id={state.run_context.get('effective_storage_policy_id') or '<unset>'}; "
+            f"password_generated={diagnostics.get('password_generated', bool(state.GENERATED_INSTANCE_PASSWORD))}; "
+            "password_redacted=True; "
+            "instance_status=ready_or_created_by_provider_apply"
+        ),
+        ["instance.validated", str(created_path)],
     )
 
 
