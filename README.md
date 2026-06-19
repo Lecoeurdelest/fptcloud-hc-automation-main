@@ -25,6 +25,10 @@ for validation, and writes results to `runs/<run_id>/log.json` and `log.html`.
 
 ## Quick Start
 
+> Reminder: before running any live health check, copy `.env.example` to `.env`
+> and fill in the required FPT Cloud/S3 values for your tenant. The runner will
+> not work correctly with an empty or stale `.env`.
+
 ```powershell
 py -3.11 -m pip install -e ".[dev]"
 Copy-Item .env.example .env
