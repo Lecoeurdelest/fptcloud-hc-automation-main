@@ -80,6 +80,10 @@ def input_configured(requirement: str) -> bool:
         return bool(instance_runner.selected_round_labels())
     if requirement == "phases.object-storage.bucket.region":
         return bool(config.object_storage_regions())
+    if requirement == "phases.network.additional-subnet.cidr":
+        return bool(config.additional_subnet_cidr())
+    if requirement == "phases.network.additional-subnet.gateway_ip":
+        return bool(config.additional_subnet_gateway())
     if " or " in requirement:
         return any(input_configured(part.strip()) for part in requirement.split(" or "))
     return bool(config.env(requirement))

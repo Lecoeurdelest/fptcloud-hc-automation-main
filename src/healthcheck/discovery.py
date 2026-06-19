@@ -90,11 +90,7 @@ def vpc_identifier_type(value: str) -> str:
 
 # ── Subnet candidate selection ────────────────────────────────────────────────
 def existing_subnet_cidrs() -> list[str]:
-    return [
-        value.strip()
-        for value in config.env("HC_EXISTING_SUBNET_CIDRS").split(",")
-        if value.strip()
-    ]
+    return config.existing_subnet_cidrs()
 
 
 def cidr_overlap(candidate: str, existing: list[str]) -> tuple[str, str]:
@@ -106,7 +102,7 @@ def cidr_overlap(candidate: str, existing: list[str]) -> tuple[str, str]:
         try:
             existing_network = ipaddress.ip_network(raw, strict=True)
         except ValueError as exc:
-            return raw, f"HC_EXISTING_SUBNET_CIDRS contains invalid CIDR {raw}: {exc}"
+            return raw, f"configured existing_subnet_cidrs contains invalid CIDR {raw}: {exc}"
         if candidate_network.overlaps(existing_network):
             return raw, ""
     return "", ""
@@ -220,11 +216,11 @@ def discover_existing_subnets(stage) -> None:
             stage.id,
             "done",
             (
-                "Loaded existing subnet inventory from HC_EXISTING_SUBNET_CIDRS; "
+                "Loaded existing subnet inventory from HC_EXISTING_SUBNET_CIDRS or healthcheck.toml network.additional-subnet existing_subnet_cidrs; "
                 f"cidrs={', '.join(item['cidr'] for item in state.existing_subnet_inventory)}; "
                 "provider_listing=not_available_in_runner"
             ),
-            ["HC_EXISTING_SUBNET_CIDRS"],
+            ["HC_EXISTING_SUBNET_CIDRS", "healthcheck.toml:network.additional-subnet.existing_subnet_cidrs"],
         )
     else:
         emit(

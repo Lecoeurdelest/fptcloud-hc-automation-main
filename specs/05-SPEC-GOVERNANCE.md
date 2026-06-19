@@ -96,6 +96,12 @@ Target infrastructure coverage may be declared in `[targets]`, for example
 highest precedence, so `VPC_IDS` and `VPC_ID` override `[targets].vpcs` for
 compatibility.
 
+Network candidate configuration may be declared per stage, for example
+`[phases."network.additional-subnet"]` with `cidr`, `gateway_ip`, and
+`existing_subnet_cidrs`. Environment overrides remain supported for local
+experiments, but environment files should not be the primary place for fixed
+tenant topology.
+
 Phase configuration must be keyed by stage id, for example
 `[phases."compute.create-instance"]`. Constraint checks in TOML must be
 structured as `key`, `op`, `value`, and optional `message`; implementations must

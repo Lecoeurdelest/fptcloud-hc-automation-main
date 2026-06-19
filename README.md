@@ -62,6 +62,98 @@ The latest run artifacts are written to:
 - `runs/<run_id>/error_queue.json`
 - `log.html`
 
+## Running From Code Files
+
+The main live-run entrypoint is a normal Python file:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\run_health_checks.py
+```
+
+Run a single stage by stage id:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\run_health_checks.py --stage compute.discover-vpc
+python scripts\run_health_checks.py --stage object-storage.bucket
+```
+
+Run from Python code when embedding the runner in another script:
+
+```python
+from healthcheck import runner
+
+runner.run(stage_filter="object-storage.bucket")
+```
+
+Use the compatibility facade if older code imports `run_health_checks` from the
+`scripts/` directory:
+
+```python
+import run_health_checks
+
+run_health_checks.main()
+```
+
+Before running from code, make sure `src` and `scripts` are on `PYTHONPATH`.
+The commands above set it explicitly for PowerShell.
+
+## Checking Results From Log Files
+
+Every live run creates a directory under `runs/`, for example:
+
+```text
+runs/hc-20260619-101559/
+```
+
+Important files:
+
+| File | Purpose |
+|---|---|
+| `runs/<run_id>/log.json` | Ordered event log for every stage |
+| `runs/<run_id>/error_queue.json` | Structured failures queued during the run |
+| `runs/<run_id>/input_diagnostics.json` | Effective input/provider diagnostics |
+| `log.html` | Browser-friendly report rendered from the latest run |
+
+Render a summary from a log file:
+
+```powershell
+$env:PYTHONPATH = "src;scripts"
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter summary
+```
+
+Show only failed/blocked/queued resources:
+
+```powershell
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter failed
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter blocked
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter queued
+```
+
+Inspect created or retained resources:
+
+```powershell
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter created_resources
+python scripts\run_health_checks.py --view runs\<run_id>\log.json --filter retained_resources
+```
+
+Quick raw JSON checks:
+
+```powershell
+python -c "import json; p='runs/<run_id>/log.json'; print(len(json.load(open(p, encoding='utf-8'))))"
+python -c "import json; p='runs/<run_id>/error_queue.json'; print(len(json.load(open(p, encoding='utf-8'))))"
+```
+
+For a successful object-storage run, `log.json` should include:
+
+- `object-storage.bucket` with `passed`
+- `object-storage.connect-s3` with `passed`
+- `object-storage.upload-file` with `passed`
+- `object-storage.delete-file` with `passed`
+- `object-storage.delete-bucket` with `destroyed`
+- `error_queue.json` with `0` entries
+
 ## `.env` Configuration
 
 Copy `.env.example` to `.env`. Never commit real `.env` files.
@@ -92,8 +184,8 @@ Common compute/network settings:
 | `HC_FLAVOR_NAME` | Target VM flavor |
 | `HC_*_IMAGE_NAME` | Optional OS image name overrides |
 | `HC_SUBNET_CIDR`, `HC_SUBNET_GATEWAY` | Subnet creation inputs |
-| `HC_ADDITIONAL_SUBNET_CIDR`, `HC_ADDITIONAL_SUBNET_GATEWAY` | Additional subnet creation inputs |
-| `HC_EXISTING_SUBNET_CIDRS` | Known existing CIDRs used to preflight-skip overlaps |
+| `HC_ADDITIONAL_SUBNET_CIDR`, `HC_ADDITIONAL_SUBNET_GATEWAY` | Optional overrides for additional subnet inputs; prefer TOML |
+| `HC_EXISTING_SUBNET_CIDRS` | Optional override for known existing CIDRs; prefer TOML |
 
 S3/object-storage settings:
 
@@ -181,6 +273,24 @@ Multiple bucket regions:
 [phases."object-storage.bucket"]
 enabled_regions = ["HN-01", "HCM-01"]
 ```
+
+Example additional-subnet settings:
+
+```toml
+[phases."network.additional-subnet"]
+cidr = "10.136.20.0/24"
+gateway_ip = "10.136.20.1"
+existing_subnet_cidrs = [
+  "10.136.10.0/24",
+  "10.136.20.0/24",
+]
+```
+
+The runner uses `cidr` as the first candidate. If it overlaps a known existing
+CIDR, it deterministically advances to the next same-size network block and
+keeps the gateway host offset. Environment variables
+`HC_ADDITIONAL_SUBNET_CIDR`, `HC_ADDITIONAL_SUBNET_GATEWAY`, and
+`HC_EXISTING_SUBNET_CIDRS` still override this TOML block for quick local tests.
 
 ## Common Commands
 
@@ -354,7 +464,7 @@ Common scale controls:
 | Keep or delete VM after validation | `delete_after_create` in `[phases."compute.create-instance"]`, or `HC_KEEP_INSTANCE` |
 | Add optional VM behavior | Add a TOML toggle plus a constraint; keep unsupported toggles fail-closed |
 | Select which OS image round runs first | `selection_order` in `[phases."compute.create-instance"]` |
-| Avoid subnet overlap | `HC_EXISTING_SUBNET_CIDRS` |
+| Avoid subnet overlap | `existing_subnet_cidrs` in `[phases."network.additional-subnet"]` |
 
 When adding a scalable scenario, prefer this pattern:
 

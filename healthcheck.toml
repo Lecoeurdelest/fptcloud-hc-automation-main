@@ -80,6 +80,17 @@ op = "=="
 value = false
 message = "Additional NIC creation is not implemented in the current create-instance phase."
 
+[phases."network.additional-subnet"]
+# Starting candidate for the additional subnet test. The runner checks this
+# against existing_subnet_cidrs and deterministically advances when an overlap
+# is found.
+cidr = "10.136.20.0/24"
+gateway_ip = "10.136.20.1"
+existing_subnet_cidrs = [
+  "10.136.10.0/24",
+  "10.136.20.0/24",
+]
+
 [phases."object-storage.bucket"]
 # Terraform bucket creation needs an FPT object-storage region (examples from
 # the module: HCM-01, HCM-02, HN-01, HN-02). S3_REGION remains only for S3

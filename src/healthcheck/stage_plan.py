@@ -115,8 +115,8 @@ def vars_for_source(
     if source == "additional_subnet":
         return {
             "name": f"hc-extra-net-{suffix}",
-            "cidr": config.env("HC_ADDITIONAL_SUBNET_CIDR"),
-            "gateway_ip": config.env("HC_ADDITIONAL_SUBNET_GATEWAY"),
+            "cidr": config.additional_subnet_cidr(),
+            "gateway_ip": config.additional_subnet_gateway(),
             "type": config.env("HC_SUBNET_TYPE", "NAT_ROUTED"),
             "vpc_id": vpc_id,
         }

@@ -24,6 +24,14 @@ no spec, no implementation.
   the first target; future `compute.select-vpc` work will iterate the full list.
 - **Rationale:** `no-spec-no-implement`
 
+### Amendment 4 — TOML additional-subnet candidates
+- **Files:** [05-SPEC-GOVERNANCE.md](05-SPEC-GOVERNANCE.md), [health-check.json](health-check.json)
+- **Summary:** Moved additional subnet candidate CIDR, gateway, and known
+  existing CIDRs to `healthcheck.toml` `[phases."network.additional-subnet"]`,
+  while preserving `HC_ADDITIONAL_SUBNET_*` and `HC_EXISTING_SUBNET_CIDRS` as
+  environment overrides.
+- **Rationale:** `no-spec-no-implement`
+
 ### Amendment 2 — S3 object-storage automation
 - **Files:** [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md), [health-check.json](health-check.json)
 - **Summary:** Converted the S3 endpoint checkpoint from a gap/manual item to

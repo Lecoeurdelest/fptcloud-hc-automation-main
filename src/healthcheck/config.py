@@ -339,12 +339,33 @@ def instance_selection_order() -> list[str]:
 
 
 def max_subnet_candidate_attempts() -> int:
+    if phase_value("network.additional-subnet", "max_candidate_attempts", None) is not None:
+        return phase_int("network.additional-subnet", "max_candidate_attempts", 1, minimum=1)
     value = spec_constants().get("MAX_SUBNET_CANDIDATE_ATTEMPTS")
     try:
         attempts = int(value)
     except (TypeError, ValueError):
         return 1
     return max(1, attempts)
+
+
+def additional_subnet_cidr() -> str:
+    return env("HC_ADDITIONAL_SUBNET_CIDR") or str(
+        phase_value("network.additional-subnet", "cidr", "")
+    ).strip()
+
+
+def additional_subnet_gateway() -> str:
+    return env("HC_ADDITIONAL_SUBNET_GATEWAY") or str(
+        phase_value("network.additional-subnet", "gateway_ip", "")
+    ).strip()
+
+
+def existing_subnet_cidrs() -> list[str]:
+    raw = env("HC_EXISTING_SUBNET_CIDRS")
+    if raw:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return phase_string_list("network.additional-subnet", "existing_subnet_cidrs")
 
 
 def cloud_context() -> dict[str, str]:

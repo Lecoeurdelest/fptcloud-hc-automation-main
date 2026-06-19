@@ -73,6 +73,34 @@ def object_storage_regions() -> list[str]:
     return [raw_region] if raw_region else []
 
 
+def phase_string_list(stage_id: str, key: str) -> list[str]:
+    raw = phase_value(stage_id, key, [])
+    if isinstance(raw, list):
+        return [str(value).strip() for value in raw if str(value).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [value.strip() for value in raw.split(",") if value.strip()]
+    return []
+
+
+def additional_subnet_cidr() -> str:
+    return env("HC_ADDITIONAL_SUBNET_CIDR") or str(
+        phase_value("network.additional-subnet", "cidr", "")
+    ).strip()
+
+
+def additional_subnet_gateway() -> str:
+    return env("HC_ADDITIONAL_SUBNET_GATEWAY") or str(
+        phase_value("network.additional-subnet", "gateway_ip", "")
+    ).strip()
+
+
+def existing_subnet_cidrs() -> list[str]:
+    raw = env("HC_EXISTING_SUBNET_CIDRS")
+    if raw:
+        return [value.strip() for value in raw.split(",") if value.strip()]
+    return phase_string_list("network.additional-subnet", "existing_subnet_cidrs")
+
+
 def runtime_string_list(section: str, key: str) -> list[str]:
     raw_section = runtime_config().get(section, {})
     if not isinstance(raw_section, dict):
@@ -265,18 +293,14 @@ def stage_inputs() -> dict[str, Any]:
             "module_path": str(ROOT / "modules" / "subnet"),
             "terraform_resource": "module.this.fptcloud_subnet.this",
             "vars": {
-                "cidr": env("HC_ADDITIONAL_SUBNET_CIDR"),
-                "gateway_ip": env("HC_ADDITIONAL_SUBNET_GATEWAY"),
+                "cidr": additional_subnet_cidr(),
+                "gateway_ip": additional_subnet_gateway(),
                 "vpc_id": selected_vpc,
             },
-            "existing_subnet_cidrs": [
-                value.strip()
-                for value in env("HC_EXISTING_SUBNET_CIDRS").split(",")
-                if value.strip()
-            ],
+            "existing_subnet_cidrs": existing_subnet_cidrs(),
             "max_subnet_candidate_attempts": spec_constants().get("MAX_SUBNET_CANDIDATE_ATTEMPTS"),
             "candidate_strategy": "deterministic increment by ten same-size network blocks, preserving gateway host offset",
-            "will_run": bool(env("HC_ADDITIONAL_SUBNET_CIDR") and env("HC_ADDITIONAL_SUBNET_GATEWAY")),
+            "will_run": bool(additional_subnet_cidr() and additional_subnet_gateway()),
         },
         "vm": {
             "required_env": [

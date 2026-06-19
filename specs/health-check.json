@@ -741,6 +741,12 @@
     "target_config_keys": [
       "targets.vpcs"
     ],
+    "network_additional_subnet_keys": [
+      "cidr",
+      "gateway_ip",
+      "existing_subnet_cidrs",
+      "max_candidate_attempts"
+    ],
     "unsupported_toggle_policy": "If a TOML toggle requests a workflow not implemented by the current module, the runner must fail or skip before Terraform apply and log the constraint/config reason."
   },
   "runner_plan": {
@@ -2144,8 +2150,8 @@
       "required_cloud_resources": [
         "Existing VPC"
       ],
-      "expected_result": "Existing subnet names, IDs, CIDRs, gateways, and VPC IDs are collected when provider/API listing or HC_EXISTING_SUBNET_CIDRS is available.",
-      "validation_method": "Attempt to collect existing subnet CIDRs in the effective VPC. If provider/API subnet listing is available, collect subnet name, subnet ID, CIDR, gateway, and VPC ID. If listing is unavailable, use HC_EXISTING_SUBNET_CIDRS as operator-provided inventory. Do not guess subnet ranges.",
+      "expected_result": "Existing subnet names, IDs, CIDRs, gateways, and VPC IDs are collected when provider/API listing, HC_EXISTING_SUBNET_CIDRS, or phases.network.additional-subnet.existing_subnet_cidrs is available.",
+      "validation_method": "Attempt to collect existing subnet CIDRs in the effective VPC. If provider/API subnet listing is available, collect subnet name, subnet ID, CIDR, gateway, and VPC ID. If listing is unavailable, use HC_EXISTING_SUBNET_CIDRS or phases.network.additional-subnet.existing_subnet_cidrs as operator-provided inventory. Do not guess subnet ranges.",
       "cleanup_behavior": "No resources are created.",
       "dependency_stages": [
         "compute.discover-vpc"
@@ -2158,14 +2164,14 @@
       "manual_check_item": "Create additional subnet from configured non-overlapping CIDR",
       "automation_status": "automated",
       "required_inputs": [
-        "HC_ADDITIONAL_SUBNET_CIDR",
-        "HC_ADDITIONAL_SUBNET_GATEWAY"
+        "HC_ADDITIONAL_SUBNET_CIDR or phases.network.additional-subnet.cidr",
+        "HC_ADDITIONAL_SUBNET_GATEWAY or phases.network.additional-subnet.gateway_ip"
       ],
       "required_cloud_resources": [
         "VPC"
       ],
       "expected_result": "Temporary additional subnet is created.",
-      "validation_method": "Terraform subnet module with explicit HC_ADDITIONAL_SUBNET_CIDR and HC_ADDITIONAL_SUBNET_GATEWAY. Select the additional subnet CIDR using MAX_SUBNET_CANDIDATE_ATTEMPTS from spec constants. Start with HC_ADDITIONAL_SUBNET_CIDR, validate against discovered existing subnet CIDRs, append overlaps to rejected_cidrs with conflict_source=preflight_inventory, then deterministically increment to the next predictable network block of the same prefix length. Emit network.select-additional-subnet-cidr with candidate_attempt_count, rejected_cidrs, selected_cidr, and overlap_reason. Emit network.additional-subnet:attempt before each apply and network.additional-subnet:overlap-detected when provider error_code=804007 is returned. If Terraform apply fails with explicit subnet overlap error_code=804007, extract attempted CIDR and conflicting subnet name when available, append the attempted CIDR to the runtime conflict list with conflict_source=provider_error, destroy/cleanup any partial resources, select the next non-overlapping candidate, and retry. Stop when subnet creation succeeds or MAX_SUBNET_CANDIDATE_ATTEMPTS is reached. Do not retry unknown errors or provider/backend system errors. If the limit is reached, skip/stop Terraform apply with subnet_cidr_exhausted and report all attempted CIDRs.",
+      "validation_method": "Terraform subnet module with explicit HC_ADDITIONAL_SUBNET_CIDR/HC_ADDITIONAL_SUBNET_GATEWAY or phases.network.additional-subnet cidr/gateway_ip. Select the additional subnet CIDR using phases.network.additional-subnet.max_candidate_attempts when configured, otherwise MAX_SUBNET_CANDIDATE_ATTEMPTS from spec constants. Start with the configured CIDR, validate against discovered existing subnet CIDRs, append overlaps to rejected_cidrs with conflict_source=preflight_inventory, then deterministically increment to the next predictable network block of the same prefix length. Emit network.select-additional-subnet-cidr with candidate_attempt_count, rejected_cidrs, selected_cidr, and overlap_reason. Emit network.additional-subnet:attempt before each apply and network.additional-subnet:overlap-detected when provider error_code=804007 is returned. If Terraform apply fails with explicit subnet overlap error_code=804007, extract attempted CIDR and conflicting subnet name when available, append the attempted CIDR to the runtime conflict list with conflict_source=provider_error, destroy/cleanup any partial resources, select the next non-overlapping candidate, and retry. Stop when subnet creation succeeds or max candidate attempts is reached. Do not retry unknown errors or provider/backend system errors. If the limit is reached, skip/stop Terraform apply with subnet_cidr_exhausted and report all attempted CIDRs.",
       "cleanup_behavior": "Always run terraform destroy for the stage workspace.",
       "dependency_stages": [
         "compute.discover-vpc",
