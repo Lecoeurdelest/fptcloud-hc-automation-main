@@ -154,6 +154,66 @@ For a successful object-storage run, `log.json` should include:
 - `object-storage.delete-bucket` with `destroyed`
 - `error_queue.json` with `0` entries
 
+## QA Checklist Coverage
+
+The operator checklist currently contains 28 user-facing cases. The current
+runner/spec set documents all 28 cases, but the automation level differs by
+case.
+
+Coverage summary:
+
+| Level | Count | Meaning |
+|---|---:|---|
+| Fully automated | 7 | Runner can create/probe/cleanup the case end to end from code |
+| Partially automated | 11 | Runner automates provisioning or the main mutation, but still needs manual OS/browser validation or future validator work |
+| Unsupported/manual/future | 10 | Case is documented in specs but provider/API support or safe automation is not implemented yet |
+| Total documented | 28 | All rows from the supplied QA checklist are represented |
+
+Detailed mapping:
+
+| Area | Case | Current coverage | Stage/spec mapping |
+|---|---|---|---|
+| Compute | Create VM subnet `172.26.221.0/24` | Fully automated | `compute.create-subnet` |
+| Compute | Create Windows Server 2012 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; OS login validation is not fully automated |
+| Compute | Create Windows Server 2016 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; OS login validation is not fully automated |
+| Compute | Create Windows Server 2019 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; OS login validation is not fully automated |
+| Compute | Create Windows Server 2022 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; OS login validation is not fully automated |
+| Compute | Create Ubuntu 16.04 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; image may be unavailable; OS login validation is not fully automated |
+| Compute | Create Ubuntu 18.04 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; image may be unavailable; OS login validation is not fully automated |
+| Compute | Create Ubuntu 20.04 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; OS login validation is not fully automated |
+| Compute | Create Ubuntu 22.04 VM, 2vCPU/2GB/40GB | Partially automated | `compute.create-instance`; OS login validation is not fully automated |
+| Compute | Resize one VM to 4vCPU/4GB | Partially automated | `compute.resize-vm` |
+| Compute | Resize OS disk from 40GB to 80GB | Unsupported/manual/future | `compute.resize-os-disk` |
+| Compute | Add and attach 40GB disk | Partially automated | `compute.add-disk` |
+| Compute | Delete VM and retain attached disk | Unsupported/manual/future | `compute.delete-vm-retain-disk` |
+| Compute | Schedule VM power on/off | Unsupported/manual/future | `compute.schedule-power` |
+| Compute | Create VM snapshot | Unsupported/manual/future | `compute.snapshot-create` |
+| Compute | Revert VM snapshot | Unsupported/manual/future | `compute.snapshot-revert` |
+| Networking | Assign public IP to VM | Unsupported/manual/future | `network.assign-public-ip` |
+| Networking | Create security group for RDP/SSH only | Partially automated | `network.security-group`; connectivity and blocked-port validation remain manual |
+| Networking | Add outbound HTTP/HTTPS rules | Unsupported/manual/future | `network.outbound-http-https` |
+| Networking | Create additional subnet `10.136.10.0/24` or next non-overlapping candidate | Fully automated | `network.additional-subnet` |
+| Networking | Add additional NIC to VM | Unsupported/manual/future | `network.additional-nic` |
+| Backup & Recovery | Create backup and run backup job | Unsupported/manual/future | `backup.vm-backup-restore` |
+| Backup & Recovery | Restore VM and verify test file | Unsupported/manual/future | `backup.vm-backup-restore` |
+| Object storage | Create bucket | Fully automated | `object-storage.bucket` |
+| Object storage | Upload file/object | Fully automated | `object-storage.upload-file` |
+| Object storage | Connect through S3 endpoint | Fully automated | `object-storage.connect-s3` |
+| Object storage | Delete uploaded file/object | Fully automated | `object-storage.delete-file` |
+| Object storage | Delete bucket | Fully automated | `object-storage.delete-bucket` |
+
+Important notes:
+
+- "Partially automated" is intentionally not reported as full PASS for the
+  original manual expectation when the case requires proof inside the guest OS
+  or a browser.
+- Object-storage is the most complete current end-to-end workflow: create
+  bucket, S3 HEAD bucket, PUT object, HEAD object, DELETE object, and destroy
+  bucket.
+- Future work should convert unsupported/manual rows only after the spec defines
+  safe inputs, cleanup behavior, validation evidence, and failure
+  classification.
+
 ## `.env` Configuration
 
 Copy `.env.example` to `.env`. Never commit real `.env` files.
