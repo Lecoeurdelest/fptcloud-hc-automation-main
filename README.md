@@ -393,6 +393,17 @@ If dependencies such as `structlog` are missing, reinstall the editable package:
 py -3.11 -m pip install -e ".[dev]"
 ```
 
+Validator-focused checks:
+
+```powershell
+$env:PYTHONPATH = "src"
+py -3.11 -m pytest tests\unit\test_validator.py -q
+```
+
+The validator tests require Python 3.11 because the project uses
+`enum.StrEnum`. Running them with the system `python` may fail if that points to
+Python 3.9 or older.
+
 ## Queue/Producer CLI
 
 The `hc` CLI remains available for the queue/checklist path:
@@ -412,6 +423,51 @@ docker compose up -d redis postgres
 $env:DATABASE_URL = "postgresql://hc:hc@localhost:5432/hc"
 hc db migrate
 ```
+
+## Validation Layer
+
+The queue/checklist path has a reusable Phase-4 validator scaffold under
+`src/hc/validator/`. It is separate from the live-runner service-specific
+validation in `src/healthcheck/`.
+
+Current validator capabilities:
+
+| Validator | Status | Notes |
+|---|---|---|
+| `TFStateValidator` | Scaffolded | Supports resource paths such as `fptcloud_subnet.this.cidr`, `equals`, and `contains` |
+| `ManualValidator` | Implemented | Returns `INCONCLUSIVE` with the checklist note |
+| `InVMValidator` | Scaffolded | Uses a pluggable probe runner today; real SSH/WinRM transport is future work |
+| `APIProbeValidator` | Scaffolded | Uses a pluggable probe runner or a basic HTTP GET probe; retry/TLS policy is future work |
+| `CompositeValidator` | Implemented | Supports AND, OR, and NOT evaluation of multiple assertions |
+
+Example:
+
+```python
+from hc.executor.models import TFState
+from hc.models import ExpectedAssertion, TaskSpec
+from hc.validator import TFStateValidator
+
+task = TaskSpec(run_id="smoke", tc_id="TC-001", tenant_id="tenant", spec_hash="hash")
+state = TFState.from_json({
+    "resources": [{
+        "type": "fptcloud_subnet",
+        "name": "this",
+        "instances": [{"attributes": {"cidr": "172.26.221.0/24"}}],
+    }],
+})
+assertion = ExpectedAssertion(
+    type="tf_state",
+    path="fptcloud_subnet.this.cidr",
+    equals="172.26.221.0/24",
+)
+
+result = TFStateValidator().evaluate(task, state, assertion)
+print(result.verdict)
+```
+
+`ExpectedAssertion` preserves checklist-specific probe fields such as `check`,
+`bucket`, `key`, `url`, and `note`, so action-specific validators can evolve
+without losing data during checklist loading.
 
 ## Extending Scenarios
 
@@ -565,6 +621,8 @@ Guidelines:
 | `src/healthcheck/runner.py` | Live-run orchestrator |
 | `src/healthcheck/object_storage_runner.py` | Object-storage workflow |
 | `src/healthcheck/s3_client.py` | S3-compatible SigV4 probe client |
+| `src/hc/validator/core.py` | Queue/checklist validator scaffold |
+| `tests/unit/test_validator.py` | Validator unit tests |
 | `runs/` | Per-run logs and evidence |
 
 ## Safety Rules
