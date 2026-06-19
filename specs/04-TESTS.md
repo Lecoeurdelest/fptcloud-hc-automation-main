@@ -147,24 +147,32 @@ Run with: `make test-unit` (pytest marker: `@pytest.mark.unit`)
 
 ### Validators (`src/hc/validator/`) — target ≥ 80%
 
-- [~] **T-0401** — `TFStateValidator` `equals` assertion passes on match (phase: P4.T2)
-- [~] **T-0402** — `TFStateValidator` `equals` assertion fails on mismatch (phase: P4.T2)
-- [~] **T-0403** — `TFStateValidator` `contains` assertion (phase: P4.T2)
-- [ ] **T-0404** — `TFStateValidator` `regex_match` assertion (phase: P4.T2)
-- [ ] **T-0405** — `TFStateValidator` `present` / `absent` assertions (phase: P4.T2)
-- [~] **T-0406** — `TFStateValidator` returns `FAIL` with JSONPath that doesn't exist (phase: P4.T2)
-- [~] **T-0407** — `InVMValidator` SSH: command returns expected stdout (phase: P4.T3)
-- [ ] **T-0408** — `InVMValidator` SSH: connection timeout → `INCONCLUSIVE` (phase: P4.T3)
-- [ ] **T-0409** — `InVMValidator` WinRM: command returns expected stdout (phase: P4.T3)
-- [ ] **T-0410** — `InVMValidator` WinRM: auth failure → `FAIL` (phase: P4.T3)
-- [ ] **T-0411** — `InVMValidator` `file_exists` probe (phase: P4.T3)
-- [~] **T-0412** — `APIProbeValidator` HTTP 200 + body match → `PASS` (phase: P4.T4)
-- [ ] **T-0413** — `APIProbeValidator` HTTP 503 → retry then `FAIL` (phase: P4.T4)
-- [ ] **T-0414** — `APIProbeValidator` TLS verify failure → `FAIL` (phase: P4.T4)
-- [~] **T-0415** — `CompositeValidator` AND: all pass → `PASS` (phase: P4.T5)
-- [~] **T-0416** — `CompositeValidator` AND: one fail → `FAIL` (phase: P4.T5)
-- [~] **T-0417** — `CompositeValidator` OR: one pass → `PASS` (phase: P4.T5)
-- [~] **T-0418** — `ManualValidator` always returns `INCONCLUSIVE` with note (phase: P4.T6)
+- [x] **T-0401** — `TFStateValidator` `equals` assertion passes on match (phase: P4.T2)
+- [x] **T-0402** — `TFStateValidator` `equals` assertion fails on mismatch (phase: P4.T2)
+- [x] **T-0403** — `TFStateValidator` `contains` assertion (phase: P4.T2)
+- [x] **T-0404** — `TFStateValidator` `regex_match` assertion (phase: P4.T2)
+- [x] **T-0405** — `TFStateValidator` `present` / `absent` assertions (phase: P4.T2)
+- [x] **T-0406** — `TFStateValidator` returns `FAIL` with JSONPath that doesn't exist (phase: P4.T2)
+- [x] **T-0407** — `InVMValidator` SSH: command returns expected stdout (phase: P4.T3)
+- [x] **T-0408** — `InVMValidator` SSH: connection timeout → `INCONCLUSIVE` (phase: P4.T3)
+- [x] **T-0409** — `InVMValidator` WinRM: command returns expected stdout (phase: P4.T3)
+- [x] **T-0410** — `InVMValidator` WinRM: auth failure → `FAIL` (phase: P4.T3)
+- [x] **T-0411** — `InVMValidator` `file_exists` probe (phase: P4.T3)
+- [x] **T-0412** — `APIProbeValidator` HTTP 200 + body match → `PASS` (phase: P4.T4)
+- [x] **T-0413** — `APIProbeValidator` HTTP 503 → retry then `FAIL` (phase: P4.T4)
+- [x] **T-0414** — `APIProbeValidator` TLS verify failure → `FAIL` (phase: P4.T4)
+- [x] **T-0415** — `CompositeValidator` AND: all pass → `PASS` (phase: P4.T5)
+- [x] **T-0416** — `CompositeValidator` AND: one fail → `FAIL` (phase: P4.T5)
+- [x] **T-0417** — `CompositeValidator` OR: one pass → `PASS` (phase: P4.T5)
+- [x] **T-0418** — `ManualValidator` always returns `INCONCLUSIVE` with note (phase: P4.T6)
+
+> Phase-4 note (2026-06-19): unit coverage has been authored for TF-state
+> `equals`, `contains`, `regex_match`, `present`, `absent`, manual
+> INCONCLUSIVE, pluggable in-VM/API probes, WinRM success/unreachable behavior,
+> SSH command output checks, restore-file `file_exists`, HTTP status/body
+> checks, retry failure, and composite modes. Local validator test run on
+> 2026-06-19: `PYTHONPATH=src python -m pytest tests/unit/test_validator.py -q`
+> → `20 passed`.
 
 ### Reporter (`src/hc/reporter/`) — target ≥ 75%
 

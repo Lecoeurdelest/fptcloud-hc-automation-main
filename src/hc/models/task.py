@@ -6,9 +6,9 @@ import hashlib
 import json
 import random
 import time
-from enum import StrEnum
-from typing import Any
+from typing import Any, Optional
 
+from hc.compat import StrEnum
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -44,8 +44,8 @@ class TaskSpec(BaseModel):
     spec: dict[str, Any] = Field(default_factory=dict)
     attempt: int = 0
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
-    enqueued_at: float | None = None
-    parent_task_id: str | None = None
+    enqueued_at: Optional[float] = None
+    parent_task_id: Optional[str] = None
 
     @model_validator(mode="after")
     def compute_task_id(self) -> TaskSpec:

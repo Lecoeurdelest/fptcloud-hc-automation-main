@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
+from hc.compat import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -18,16 +18,35 @@ class ExpectedAssertion(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     type: Literal["tf_state", "in_vm", "api_probe", "manual"]
-    path: str | None = None
-    equals: str | None = None
-    contains: str | None = None
-    probe: str | None = None
-    check: str | None = None
-    bucket: str | None = None
-    key: str | None = None
-    note: str | None = None
-    url: str | None = None
-    status_code: int | None = None
+    path: Optional[str] = None
+    equals: Optional[str] = None
+    contains: Optional[str] = None
+    regex_match: Optional[str] = None
+    present: Optional[bool] = None
+    absent: Optional[bool] = None
+    probe: Optional[str] = None
+    command: Optional[str] = None
+    transport: Optional[str] = None
+    os_type: Optional[str] = None
+    host: Optional[str] = None
+    host_path: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    private_key_path: Optional[str] = None
+    exit_code: Optional[int] = None
+    stdout_contains: Optional[str] = None
+    file_exists: Optional[str] = None
+    check: Optional[str] = None
+    bucket: Optional[str] = None
+    key: Optional[str] = None
+    note: Optional[str] = None
+    url: Optional[str] = None
+    method: Optional[str] = None
+    status_code: Optional[int] = None
+    timeout_seconds: Optional[float] = None
+    retries: Optional[int] = None
+    tls_verify: Optional[bool] = None
 
 
 class Checkpoint(BaseModel):

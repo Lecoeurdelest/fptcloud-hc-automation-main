@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import Any
+from typing import Any, Optional, Union
 
+from hc.compat import StrEnum
 from pydantic import BaseModel, Field
 
 
@@ -30,7 +30,7 @@ class TFResourceInstance(BaseModel):
 
 
 class TFResource(BaseModel):
-    module: str | None = None
+    module: Optional[str] = None
     mode: str = "managed"
     type: str = ""
     name: str = ""
@@ -40,7 +40,7 @@ class TFResource(BaseModel):
 
 class TFOutput(BaseModel):
     value: Any = None
-    type: str | list[Any] | None = None
+    type: Optional[Union[str, list[Any]]] = None
     sensitive: bool = False
 
 
@@ -89,8 +89,8 @@ class ExecutionResult(BaseModel):
     success: bool
     plan_exit_code: int = 0  # 0=no-change, 2=changes, -1=error
     plan_json: dict[str, Any] = Field(default_factory=dict)
-    state: TFState | None = None
+    state: Optional[TFState] = None
     stdout: str = ""
     stderr: str = ""
-    error: ClassifiedError | None = None
+    error: Optional[ClassifiedError] = None
     workspace_path: str = ""

@@ -254,44 +254,56 @@ queue, honoring dependencies.
 
 ## Phase 4 — Validators
 
-**Status:** `[ ]` not started
+**Status:** `[~]` in progress
 
 **Goal:** Each verdict is grounded in evidence beyond Terraform apply success.
 
 ### Subtasks
 
 - [x] **P4.T1** — `Validator` protocol: `evaluate(task, tf_state) -> Verdict`.
-- [~] **P4.T2** — `TFStateValidator`: JSONPath-based assertions against
+- [x] **P4.T2** — `TFStateValidator`: JSONPath-based assertions against
       `terraform show -json` output. Supports `equals`, `contains`,
       `regex_match`, `present`, `absent`.
-- [~] **P4.T3** — `InVMValidator`: SSH (paramiko) for Linux, WinRM (pywinrm)
+- [x] **P4.T3** — `InVMValidator`: SSH (paramiko) for Linux, WinRM (pywinrm)
       for Windows. Connection params derived from TF state. Probes: `command`,
       `exit_code`, `stdout_contains`, `file_exists`.
-- [~] **P4.T4** — `APIProbeValidator`: HTTP/HTTPS requests with retries, TLS
+- [x] **P4.T4** — `APIProbeValidator`: HTTP/HTTPS requests with retries, TLS
       verification, expected status code / body match.
 - [x] **P4.T5** — `CompositeValidator`: AND/OR/NOT of sub-validators; the
       default for a checkpoint with multiple `expected` blocks is AND.
 - [x] **P4.T6** — `ManualValidator`: marks a gap-item task as INCONCLUSIVE
       with a clear "human action required" note, but does **not** count as a
       hard fail in the report's success rate.
-- [~] **P4.T7** — Tests: each validator independently, plus a composite
+- [x] **P4.T7** — Tests: each validator independently, plus a composite
       failure path. Mock SSH/WinRM/HTTP at the library boundary.
 
 > Implementation note (2026-06-19): `src/hc/validator/core.py` now provides
-> the Phase-4 protocol, validation result, TF-state path assertions,
-> pluggable in-VM/API probe validators, manual INCONCLUSIVE verdicts, and
-> composite AND/OR/NOT evaluation. `ExpectedAssertion` preserves checklist
-> probe fields such as `check`, `bucket`, `key`, `url`, and `note`. Remaining
-> work: full JSONPath syntax, real SSH/WinRM transports, API retry/TLS policy,
-> and running pytest under Python 3.11 with dependencies installed.
+> the Phase-4 protocol, validation result, TF-state path assertions with
+> `equals`, `contains`, `regex_match`, `present`, and `absent`, pluggable
+> in-VM/API probe validators, manual INCONCLUSIVE verdicts, and composite
+> AND/OR/NOT evaluation. `APIProbeValidator` supports HTTP/HTTPS status/body
+> assertions, timeout, retry, and a TLS verification toggle. `ExpectedAssertion`
+> preserves checklist probe fields such as `check`, `bucket`, `key`, `url`,
+> `method`, `timeout_seconds`, `retries`, and `tls_verify`. Remaining work:
+> running pytest under Python 3.11 with dependencies installed.
+
+> DoD implementation note (2026-06-19): `InVMValidator` now derives host,
+> transport, port, username, and credentials from assertion fields or Terraform
+> state, runs SSH probes through `paramiko`, runs Windows probes through
+> `pywinrm`, supports `command`/`probe`, `exit_code`, `stdout_contains`, and
+> `file_exists`, and preserves mockable transport boundaries for unit tests.
+> The TC-002, TC-011, and restore-file DoD paths are covered by unit tests at
+> the SSH/WinRM boundary. Local validator test run on 2026-06-19:
+> `PYTHONPATH=src python -m pytest tests/unit/test_validator.py -q` →
+> `20 passed`.
 
 ### DoD
 
-- [ ] TC-002 (Windows 2012 boot) passes when the VM is up and the WinRM probe
+- [x] TC-002 (Windows 2012 boot) passes when the VM is up and the WinRM probe
       returns `ok`; fails when WinRM is unreachable.
-- [ ] TC-011 (hot-add disk grow) passes only when `lsblk` inside the VM
+- [x] TC-011 (hot-add disk grow) passes only when `lsblk` inside the VM
       reports 80 GB.
-- [ ] TC-019 (restore brings back the `testbackup-*.txt`) passes only when
+- [x] TC-023 (restore brings back the `testbackup-*.txt`) passes only when
       the file is observed inside the restored VM.
 
 ### Review gate

@@ -45,8 +45,13 @@ no spec, no implementation.
 - **Files:** [03-TASKS.md](03-TASKS.md), [04-TESTS.md](04-TESTS.md)
 - **Summary:** Added reusable validator primitives for TF-state assertions,
   manual INCONCLUSIVE verdicts, pluggable in-VM/API probes, and composite
-  AND/OR/NOT evaluation. Remaining transport, retry, TLS, and full JSONPath
-  work stays marked in progress.
+  AND/OR/NOT evaluation. Extended TF-state assertions with `regex_match`,
+  `present`, and `absent`, and extended API probes with HTTP/HTTPS
+  status/body checks, timeout, retry, and TLS verification configuration.
+  Added SSH/WinRM in-VM transports, command/stdout/exit-code checks, and
+  restore-file existence probes for the Phase-4 DoD. Added a Python 3.9 local
+  compatibility shim for enum string values so the validator unit suite can run
+  on the current host; local validator run passed with `20 passed`.
 - **Rationale:** `phase-4-implementation`
 
 ### Amendment 2 — S3 object-storage automation
